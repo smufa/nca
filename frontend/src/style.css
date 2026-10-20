@@ -152,7 +152,10 @@ main {
 
 .views {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 320px));
+  grid-template-columns: repeat(
+    auto-fill,
+    minmax(min(var(--view-size, 320px), 100%), var(--view-size, 320px))
+  );
   gap: 16px;
   justify-content: center;
   align-content: start;

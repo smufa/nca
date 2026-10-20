@@ -34,6 +34,8 @@ const brushRadiusInput = el<HTMLInputElement>('brushRadius');
 const brushRadiusVal = el<HTMLElement>('brushRadiusVal');
 const brushFactorInput = el<HTMLInputElement>('brushFactor');
 const brushAlphaInput = el<HTMLInputElement>('brushAlpha');
+const viewSizeInput = el<HTMLInputElement>('viewSize');
+const viewSizeVal = el<HTMLElement>('viewSizeVal');
 
 /** A render panel: its own canvas + channel mapping selectors. */
 interface View {
@@ -615,6 +617,15 @@ brushAlphaInput.addEventListener('change', () => {
   brushAlpha = brushAlphaInput.checked;
 });
 
+function applyViewSize(px: number): void {
+  document.documentElement.style.setProperty('--view-size', `${px}px`);
+  viewSizeVal.textContent = String(px);
+}
+
+viewSizeInput.addEventListener('input', () => {
+  applyViewSize(Number(viewSizeInput.value));
+});
+
 angleInput.addEventListener('input', () => {
   if (!linkedInput.checked) return;
   const deg = Number(angleInput.value);
@@ -752,6 +763,7 @@ if (!('gpu' in navigator)) {
 } else {
   buildKernelEditors();
   resetKernelsUI();
+  applyViewSize(Number(viewSizeInput.value));
   void loadModels();
   requestAnimationFrame(frame);
 }
