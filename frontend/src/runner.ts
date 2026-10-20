@@ -7,9 +7,17 @@ import type { Rng } from './nca';
 // and this avoids needing cross-origin-isolation (SharedArrayBuffer) headers.
 ort.env.wasm.numThreads = 1;
 
+const STATE_USAGE =
+  GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
+
 /**
- * Runs one trained NCA on the GPU. The ONNX graph is a single deterministic
- * step; the stochastic update mask is generated here each step.
+ * Runs one trained NCA.
+ *
+ * When WebGPU IO binding is available the state lives in a pair of ping-pong
+ * GPU buffers, so a step never moves the state across the bus: the fire mask is
+ * written into a small GPU buffer, the output is written straight into the other
+ * state buffer (`session.run(feeds, fetches)`), and we only download the state
+ * for rendering (`sync`). If that setup fails we fall back to CPU tensors.
  */
 export class CaRunner {
   readonly meta: ManifestModel['meta'];
@@ -26,6 +34,22 @@ export class CaRunner {
   private seed: number;
   private stepping = false;
   private queuedEdits: Array<(x: Float32Array) => void> = [];
+
+  // GPU IO-binding state
+  private useGpu = false;
+  private device: GPUDevice | null = null;
+  private stateBytes = 0;
+  private bufA: GPUBuffer | null = null;
+  private bufB: GPUBuffer | null = null;
+  private maskBuf: GPUBuffer | null = null;
+  private weightBuf: GPUBuffer | null = null;
+  private staging: GPUBuffer | null = null;
+  private tensorA: ort.Tensor | null = null;
+  private tensorB: ort.Tensor | null = null;
+  private maskTensor: ort.Tensor | null = null;
+  private weightTensor: ort.Tensor | null = null;
+  private stepTensor: ort.Tensor | null = null;
+  private cur = 0;
 
   private constructor(
     session: ort.InferenceSession,
@@ -48,7 +72,65 @@ export class CaRunner {
     const session = await ort.InferenceSession.create(`/models/${model.path}`, {
       executionProviders: ['webgpu'],
     });
-    return new CaRunner(session, model.meta, seed);
+    const runner = new CaRunner(session, model.meta, seed);
+    await runner.setupGpu();
+    return runner;
+  }
+
+  /** 'gpu' when IO binding is active, otherwise 'cpu'. */
+  get mode(): 'gpu' | 'cpu' {
+    return this.useGpu ? 'gpu' : 'cpu';
+  }
+
+  /** Allocate the GPU buffers and wrap them as ORT tensors. */
+  private async setupGpu(): Promise<void> {
+    try {
+      const device = await ort.env.webgpu.device;
+      if (!device) return;
+
+      const { channelN: C, grid: H } = this;
+      const W = H;
+      this.stateBytes = C * H * W * 4;
+
+      const alloc = (bytes: number, usage: number): GPUBuffer =>
+        device.createBuffer({ size: Math.ceil(bytes / 16) * 16, usage });
+
+      this.bufA = alloc(this.stateBytes, STATE_USAGE);
+      this.bufB = alloc(this.stateBytes, STATE_USAGE);
+      this.maskBuf = alloc(
+        H * W * 4,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      );
+      this.weightBuf = alloc(
+        3 * C * 9 * 4,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      );
+      this.staging = alloc(
+        this.stateBytes,
+        GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+      );
+
+      const dims = [1, C, H, W];
+      this.tensorA = ort.Tensor.fromGpuBuffer(this.bufA, { dataType: 'float32', dims });
+      this.tensorB = ort.Tensor.fromGpuBuffer(this.bufB, { dataType: 'float32', dims });
+      this.maskTensor = ort.Tensor.fromGpuBuffer(this.maskBuf, {
+        dataType: 'float32',
+        dims: [1, 1, H, W],
+      });
+      this.weightTensor = ort.Tensor.fromGpuBuffer(this.weightBuf, {
+        dataType: 'float32',
+        dims: [3 * C, 1, 3, 3],
+      });
+      this.stepTensor = new ort.Tensor('float32', new Float32Array([1]), []);
+
+      device.queue.writeBuffer(this.weightBuf, 0, this.weight);
+      this.device = device;
+      this.useGpu = true;
+      this.uploadState();
+    } catch (e) {
+      console.warn('GPU IO binding unavailable; falling back to CPU tensors', e);
+      this.useGpu = false;
+    }
   }
 
   /** Restore the single-cell seed state. */
@@ -57,26 +139,56 @@ export class CaRunner {
     this.rng = mulberry32(this.seed);
     this.x = seedState(this.channelN, this.grid);
     this.queuedEdits = [];
+    this.cur = 0;
     this.stepCount = 0;
+    this.uploadState();
   }
 
   /**
    * Apply an edit to the state.
    *
-   * While a step is in flight `x` still points at that step's *input* buffer,
-   * and the step will replace it with its output. So we queue the edit and apply
-   * it to the fresh state once the step finishes; otherwise it would be lost.
+   * While a step is in flight the state buffers are being swapped, so the edit
+   * is queued and applied to the fresh state once the step finishes; otherwise
+   * it would be lost.
    */
   edit(fn: (x: Float32Array) => void): void {
-    if (this.stepping) this.queuedEdits.push(fn);
-    else fn(this.x);
+    if (this.stepping) {
+      this.queuedEdits.push(fn);
+      return;
+    }
+    fn(this.x);
+    this.uploadState();
   }
 
-  private flushEdits(): void {
+  private async flushEdits(): Promise<void> {
     if (this.queuedEdits.length === 0) return;
     const queued = this.queuedEdits;
     this.queuedEdits = [];
+    if (this.useGpu) await this.sync(); // refresh the CPU mirror from the GPU
     for (const fn of queued) fn(this.x);
+    this.uploadState();
+  }
+
+  private uploadState(): void {
+    if (!this.useGpu || !this.device) return;
+    const buf = this.cur === 0 ? this.bufA : this.bufB;
+    if (buf) this.device.queue.writeBuffer(buf, 0, this.x);
+  }
+
+  /** Download the current GPU state into the CPU mirror (for rendering). */
+  async sync(): Promise<void> {
+    if (!this.useGpu || !this.device || !this.staging) return;
+    const buf = this.cur === 0 ? this.bufA : this.bufB;
+    if (!buf) return;
+
+    const encoder = this.device.createCommandEncoder();
+    encoder.copyBufferToBuffer(buf, 0, this.staging, 0, this.stateBytes);
+    this.device.queue.submit([encoder.finish()]);
+    await this.staging.mapAsync(GPUMapMode.READ);
+    this.x = new Float32Array(
+      this.staging.getMappedRange(0, this.stateBytes).slice(0),
+    );
+    this.staging.unmap();
   }
 
   /** Advance the CA by one step. */
@@ -89,25 +201,48 @@ export class CaRunner {
       this.mask[i] = this.rng() < this.fireRate ? 1 : 0;
     }
 
-    const feeds: Record<string, ort.Tensor> = {
-      x: new ort.Tensor('float32', this.x, [1, C, H, W]),
-      perception_weight: new ort.Tensor('float32', this.weight, [3 * C, 1, 3, 3]),
-      fire_mask: new ort.Tensor('float32', this.mask, [1, 1, H, W]),
-      step_size: new ort.Tensor('float32', new Float32Array([1]), []),
-    };
-
     this.stepping = true;
     try {
-      const out = await this.session.run(feeds);
-      this.x = (out['x_next'] as ort.Tensor).data as Float32Array;
+      if (this.useGpu && this.device && this.maskBuf && this.maskTensor) {
+        this.device.queue.writeBuffer(this.maskBuf, 0, this.mask);
+        const inTensor = this.cur === 0 ? this.tensorA : this.tensorB;
+        const outTensor = this.cur === 0 ? this.tensorB : this.tensorA;
+        const feeds: Record<string, ort.Tensor> = {
+          x: inTensor!,
+          perception_weight: this.weightTensor!,
+          fire_mask: this.maskTensor,
+          step_size: this.stepTensor!,
+        };
+        // Pre-allocated output: ORT writes straight into our other state buffer.
+        await this.session.run(feeds, { x_next: outTensor! });
+        this.cur ^= 1;
+      } else {
+        const feeds: Record<string, ort.Tensor> = {
+          x: new ort.Tensor('float32', this.x, [1, C, H, W]),
+          perception_weight: new ort.Tensor('float32', this.weight, [3 * C, 1, 3, 3]),
+          fire_mask: new ort.Tensor('float32', this.mask, [1, 1, H, W]),
+          step_size: new ort.Tensor('float32', new Float32Array([1]), []),
+        };
+        const out = await this.session.run(feeds);
+        this.x = (out['x_next'] as ort.Tensor).data as Float32Array;
+      }
     } finally {
       this.stepping = false;
     }
-    this.flushEdits();
+
+    await this.flushEdits();
     this.stepCount++;
   }
 
   async dispose(): Promise<void> {
+    if (this.useGpu) {
+      this.bufA?.destroy();
+      this.bufB?.destroy();
+      this.maskBuf?.destroy();
+      this.weightBuf?.destroy();
+      this.staging?.destroy();
+      this.useGpu = false;
+    }
     await this.session.release();
   }
 }

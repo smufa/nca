@@ -375,6 +375,7 @@ function updateInfo(): void {
     ['params', m.num_parameters.toLocaleString()],
     ['experiment', m.experiment],
     ['fire rate', String(runner.fireRate)],
+    ['io', runner.mode],
     ['views', String(views.length)],
     ['parity', parity],
   ]
@@ -484,6 +485,7 @@ stepBtn.addEventListener('click', async () => {
   setBusy(true);
   try {
     await runner.step();
+    await runner.sync();
   } catch (e) {
     console.error(e);
     setStatus(`step failed: ${(e as Error).message}`, 'err');
@@ -545,6 +547,7 @@ async function frame(t: number): Promise<void> {
       await runner.step();
       done++;
     }
+    await runner.sync();
   } catch (e) {
     console.error(e);
     setStatus(`step failed: ${(e as Error).message}`, 'err');
