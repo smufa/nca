@@ -12,3 +12,6 @@ wheels/
 # Training outputs
 runs/
 logs/
+
+# local profiling screenshots
+screenshots/
