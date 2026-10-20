@@ -202,6 +202,20 @@ main {
   border-radius: 4px;
 }
 
+.channels select:disabled {
+  opacity: 0.4;
+}
+
+.channels label.single {
+  gap: 4px;
+  cursor: pointer;
+}
+
+.channels input[type='checkbox'] {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .view canvas {
   display: block;
   width: 100%;

@@ -265,6 +265,15 @@ function createView(mapping: ChannelMapping): View {
     return sel;
   };
 
+  const singleWrap = document.createElement('label');
+  singleWrap.className = 'single';
+  singleWrap.title = 'Show a single channel as grayscale';
+  const singleBox = document.createElement('input');
+  singleBox.type = 'checkbox';
+  singleWrap.appendChild(singleBox);
+  singleWrap.appendChild(document.createTextNode('1ch'));
+  channels.appendChild(singleWrap);
+
   const rSel = mkChannel('R', false);
   const gSel = mkChannel('G', false);
   const bSel = mkChannel('B', false);
@@ -317,6 +326,13 @@ function createView(mapping: ChannelMapping): View {
   };
 
   const sync = (): void => {
+    // Single-channel mode: R drives G and B, which are disabled.
+    if (singleBox.checked) {
+      gSel.value = rSel.value;
+      bSel.value = rSel.value;
+    }
+    gSel.disabled = singleBox.checked;
+    bSel.disabled = singleBox.checked;
     view.mapping = {
       r: Number(rSel.value),
       g: Number(gSel.value),
@@ -326,7 +342,7 @@ function createView(mapping: ChannelMapping): View {
     };
     drawView(view);
   };
-  for (const sel of [rSel, gSel, bSel, aSel, bgSel]) {
+  for (const sel of [rSel, gSel, bSel, aSel, bgSel, singleBox]) {
     sel.addEventListener('change', sync);
   }
 
@@ -453,7 +469,7 @@ async function selectModel(model: ManifestModel): Promise<void> {
   rebuildViews();
   drawAll();
   updateInfo();
-  setStatus('ready · WebGPU', 'ok');
+  setStatus(`ready · ${runner.mode === 'gpu' ? 'WebGPU' : 'WASM'}`, 'ok');
 }
 
 async function loadModels(): Promise<void> {
