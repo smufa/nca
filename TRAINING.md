@@ -45,6 +45,15 @@ uv sync --no-sources --python 3.13 --group dev
 Fallback if we want zero lock divergence: `uv venv --python 3.13` +
 `uv pip install --torch-backend cu130 -r requirements.txt`.
 
+### Gotchas found
+
+- The Lmod environment exports `PYTHONPATH` pointing at a Python 3.12
+  site-packages tree on cvmfs, which shadows the venv's `numpy`/`torch`
+  (`ImportError: you should not try to import numpy from its source directory`).
+  `slurm/train.sbatch` does `unset PYTHONPATH PYTHONHOME`.
+- The sample pool generated `randperm` indices on the CPU while the pool lived on
+  CUDA; fixed in `nca/pool.py`.
+
 ## Code changes (done)
 
 - **Periodic boundaries**: the CA now wraps (circular padding in perception and in
@@ -122,7 +131,8 @@ cd ~/nca && uv sync --no-sources --python 3.13 --group dev
 
 ## Milestones
 
-1. **T1** — env on cluster + H100 smoke test (imports, 100 iters).
+1. **T1** — env on cluster + H100 smoke test (imports, 100 iters). ✅ done
+   (validated on an H100 MIG slice: `torch 2.14.1+cu130`, CUDA ok, loss drops)
 2. **T2** — one high-quality run (crab, regenerating) + ONNX export.
 3. **T3** — sweep experiments 1–3 across the 6 targets.
 4. **T4** — compare/curate models, ship to the frontend.
