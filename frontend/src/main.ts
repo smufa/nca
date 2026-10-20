@@ -2,7 +2,7 @@ import './style.css';
 import { loadManifest } from './models';
 import type { Manifest, ManifestModel } from './models';
 import { CaRunner } from './runner';
-import { mapChannels } from './nca';
+import { CANONICAL_KERNELS, mapChannels, rotateKernels } from './nca';
 import type { ChannelMapping } from './nca';
 
 function el<T extends HTMLElement>(id: string): T {
@@ -23,6 +23,12 @@ const speedInput = el<HTMLInputElement>('speed');
 const speedVal = el<HTMLElement>('speedVal');
 const infoEl = el<HTMLDListElement>('info');
 const addViewBtn = el<HTMLButtonElement>('addView');
+const angleInput = el<HTMLInputElement>('angle');
+const angleVal = el<HTMLElement>('angleVal');
+const linkedInput = el<HTMLInputElement>('linked');
+const autoRotateInput = el<HTMLInputElement>('autoRotate');
+const kernelGridsEl = el<HTMLDivElement>('kernelGrids');
+const resetKernelsBtn = el<HTMLButtonElement>('resetKernels');
 const toolsEl = el<HTMLDivElement>('tools');
 const brushRadiusInput = el<HTMLInputElement>('brushRadius');
 const brushRadiusVal = el<HTMLElement>('brushRadiusVal');
@@ -239,6 +245,89 @@ function tickStroke(): void {
   if (!stroke || !runner) return;
   paintDot(stroke.view, stroke.curX, stroke.curY);
   drawAll();
+}
+
+// --- Kernel lab ---------------------------------------------------------
+
+const KERNEL_NAMES = ['identity', 'dx', 'dy'];
+const kernelInputs: HTMLInputElement[][] = [[], [], []];
+let autoAngle = 0;
+
+function swatch(inp: HTMLInputElement, v: number): void {
+  const a = Math.min(1, Math.abs(v)) * 0.55;
+  inp.style.background =
+    v > 0
+      ? `rgba(91,140,255,${a})`
+      : v < 0
+        ? `rgba(248,113,113,${a})`
+        : 'var(--panel-2)';
+}
+
+function setKernelInputs(kernels: number[][]): void {
+  for (let k = 0; k < 3; k++) {
+    for (let i = 0; i < 9; i++) {
+      const v = kernels[k][i];
+      kernelInputs[k][i].value = String(v);
+      swatch(kernelInputs[k][i], v);
+    }
+  }
+}
+
+function readKernelInputs(): number[][] {
+  return kernelInputs.map((arr) => arr.map((inp) => Number(inp.value) || 0));
+}
+
+function setLinked(linked: boolean): void {
+  linkedInput.checked = linked;
+  for (const arr of kernelInputs) for (const inp of arr) inp.disabled = linked;
+}
+
+function applyKernels(kernels: number[][]): void {
+  setKernelInputs(kernels);
+  if (runner) runner.setKernels(kernels[0], kernels[1], kernels[2]);
+}
+
+function onKernelEdit(): void {
+  if (linkedInput.checked) setLinked(false);
+  const kernels = readKernelInputs();
+  for (let k = 0; k < 3; k++) {
+    for (let i = 0; i < 9; i++) swatch(kernelInputs[k][i], kernels[k][i]);
+  }
+  if (runner) runner.setKernels(kernels[0], kernels[1], kernels[2]);
+}
+
+function resetKernelsUI(): void {
+  autoAngle = 0;
+  angleInput.value = '0';
+  angleVal.textContent = '0°';
+  setLinked(true);
+  applyKernels(CANONICAL_KERNELS.map((k) => k.slice()));
+}
+
+function buildKernelEditors(): void {
+  kernelGridsEl.innerHTML = '';
+  for (let k = 0; k < 3; k++) {
+    const block = document.createElement('div');
+    block.className = 'kernel';
+    const title = document.createElement('div');
+    title.className = 'kernel-title';
+    title.textContent = KERNEL_NAMES[k];
+    block.appendChild(title);
+    const grid = document.createElement('div');
+    grid.className = 'kgrid';
+    for (let i = 0; i < 9; i++) {
+      const inp = document.createElement('input');
+      inp.type = 'number';
+      inp.step = '0.125';
+      inp.value = '0';
+      inp.disabled = true;
+      inp.addEventListener('input', onKernelEdit);
+      grid.appendChild(inp);
+      kernelInputs[k].push(inp);
+    }
+    block.appendChild(grid);
+    kernelGridsEl.appendChild(block);
+  }
 }
 
 function createView(mapping: ChannelMapping): View {
@@ -467,6 +556,7 @@ async function selectModel(model: ManifestModel): Promise<void> {
     return;
   }
   rebuildViews();
+  resetKernelsUI();
   drawAll();
   updateInfo();
   setStatus(`ready · ${runner.mode === 'gpu' ? 'WebGPU' : 'WASM'}`, 'ok');
@@ -524,6 +614,23 @@ brushFactorInput.addEventListener('input', () => {
 brushAlphaInput.addEventListener('change', () => {
   brushAlpha = brushAlphaInput.checked;
 });
+
+angleInput.addEventListener('input', () => {
+  if (!linkedInput.checked) return;
+  const deg = Number(angleInput.value);
+  angleVal.textContent = `${deg}°`;
+  applyKernels(rotateKernels((deg * Math.PI) / 180));
+});
+
+linkedInput.addEventListener('change', () => {
+  setLinked(linkedInput.checked);
+  if (linkedInput.checked) {
+    const deg = Number(angleInput.value);
+    applyKernels(rotateKernels((deg * Math.PI) / 180));
+  }
+});
+
+resetKernelsBtn.addEventListener('click', resetKernelsUI);
 
 addViewBtn.addEventListener('click', () => {
   if (!runner) return;
@@ -600,6 +707,15 @@ async function frame(t: number): Promise<void> {
   tickStroke();
   const dt = Math.min((t - lastT) / 1000, 0.1);
   lastT = t;
+
+  if (autoRotateInput.checked) {
+    autoAngle = (autoAngle + dt * 45) % 360;
+    if (!linkedInput.checked) setLinked(true);
+    angleInput.value = String(Math.round(autoAngle));
+    angleVal.textContent = `${Math.round(autoAngle)}°`;
+    applyKernels(rotateKernels((autoAngle * Math.PI) / 180));
+  }
+
   if (!playing || !runner || busy) return;
 
   accumulator += dt * Number(speedInput.value);
@@ -634,6 +750,8 @@ async function frame(t: number): Promise<void> {
 if (!('gpu' in navigator)) {
   setStatus('WebGPU is not available in this browser', 'err');
 } else {
+  buildKernelEditors();
+  resetKernelsUI();
   void loadModels();
   requestAnimationFrame(frame);
 }

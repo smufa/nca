@@ -65,6 +65,20 @@
 
           <button id="addView" class="wide">+ Add channel view</button>
 
+          <details class="lab">
+            <summary>Kernel lab</summary>
+            <label class="field">
+              <span>Angle <b id="angleVal">0°</b></span>
+              <input id="angle" type="range" min="0" max="360" value="0" />
+            </label>
+            <div class="lab-row">
+              <label class="tfield"><input id="linked" type="checkbox" checked /> linked</label>
+              <label class="tfield"><input id="autoRotate" type="checkbox" /> auto-rotate</label>
+            </div>
+            <div id="kernelGrids" class="kernel-grids"></div>
+            <button id="resetKernels" class="wide">Reset kernels</button>
+          </details>
+
           <dl id="info" class="info"></dl>
         </aside>
       </main>

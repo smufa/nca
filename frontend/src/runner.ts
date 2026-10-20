@@ -1,6 +1,6 @@
 import * as ort from 'onnxruntime-web/webgpu';
 import type { ManifestModel } from './models';
-import { mulberry32, perceptionWeight, seedState } from './nca';
+import { buildPerceptionWeight, CANONICAL_KERNELS, mulberry32, seedState } from './nca';
 import type { Rng } from './nca';
 
 // Single-threaded WASM core is enough: the heavy lifting runs on the WebGPU EP,
@@ -32,6 +32,7 @@ export class CaRunner {
   private session: ort.InferenceSession;
   private weight: Float32Array;
   private mask: Float32Array;
+  private kernels: number[][] = CANONICAL_KERNELS.map((k) => k.slice());
   private rng: Rng;
   private seed: number;
   private stepping = false;
@@ -65,7 +66,7 @@ export class CaRunner {
     this.grid = meta.grid;
     this.fireRate = meta.fire_rate;
     this.seed = seed;
-    this.weight = perceptionWeight(this.channelN);
+    this.weight = buildPerceptionWeight(this.channelN, this.kernels);
     this.mask = new Float32Array(this.grid * this.grid);
     this.rng = mulberry32(seed);
     this.x = seedState(this.channelN, this.grid);
@@ -92,6 +93,22 @@ export class CaRunner {
   /** WebGPU adapter description, for diagnostics. */
   get adapter(): string {
     return this.adapterDesc || 'unknown';
+  }
+
+  /**
+   * Replace the perception basis `[identity, dx, dy]` and re-upload it.
+   * The ONNX graph takes the kernel as an input, so no session rebuild needed.
+   */
+  setKernels(ident: number[], dx: number[], dy: number[]): void {
+    this.kernels = [ident.slice(), dx.slice(), dy.slice()];
+    this.weight = buildPerceptionWeight(this.channelN, this.kernels);
+    if (this.useGpu && this.device && this.weightBuf) {
+      this.device.queue.writeBuffer(this.weightBuf, 0, this.weight);
+    }
+  }
+
+  getKernels(): number[][] {
+    return this.kernels.map((k) => k.slice());
   }
 
   /** Allocate the GPU buffers and wrap them as ORT tensors. */

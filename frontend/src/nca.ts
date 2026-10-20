@@ -16,18 +16,18 @@ export function mulberry32(seed: number): Rng {
   };
 }
 
-/**
- * Build the fixed depthwise perception kernel as a `[3C, 1, 3, 3]` weight.
- *
- * For every input channel the three output channels are identity, d/dx and
- * d/dy (Sobel / 8), matching the Python `_perception_kernels`.
- */
-export function perceptionWeight(channelN: number): Float32Array {
-  const ident = [0, 0, 0, 0, 1, 0, 0, 0, 0];
-  const dx = [-1, 0, 1, -2, 0, 2, -1, 0, 1].map((v) => v / 8);
-  const dy = [-1, -2, -1, 0, 0, 0, 1, 2, 1].map((v) => v / 8);
-  const kernels = [ident, dx, dy];
+/** The canonical perception basis: [identity, Sobel-x/8, Sobel-y/8]. */
+export const CANONICAL_KERNELS: readonly number[][] = [
+  [0, 0, 0, 0, 1, 0, 0, 0, 0],
+  [-1, 0, 1, -2, 0, 2, -1, 0, 1].map((v) => v / 8),
+  [-1, -2, -1, 0, 0, 0, 1, 2, 1].map((v) => v / 8),
+];
 
+/** Expand three 3x3 basis kernels into the depthwise `[3C, 1, 3, 3]` weight. */
+export function buildPerceptionWeight(
+  channelN: number,
+  kernels: readonly number[][],
+): Float32Array {
   const w = new Float32Array(3 * channelN * 9);
   for (let ci = 0; ci < channelN; ci++) {
     for (let cm = 0; cm < 3; cm++) {
@@ -36,6 +36,26 @@ export function perceptionWeight(channelN: number): Float32Array {
     }
   }
   return w;
+}
+
+/** The fixed identity + Sobel perception basis. */
+export function perceptionWeight(channelN: number): Float32Array {
+  return buildPerceptionWeight(channelN, CANONICAL_KERNELS);
+}
+
+/**
+ * Rotate the perception basis by `angle` radians (identity unchanged):
+ * `dx' = cos·dx − sin·dy`, `dy' = sin·dx + cos·dy`.
+ */
+export function rotateKernels(angle: number): number[][] {
+  const [ident, dx, dy] = CANONICAL_KERNELS;
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  return [
+    ident.slice(),
+    dx.map((v, i) => c * v - s * dy[i]),
+    dx.map((v, i) => s * v + c * dy[i]),
+  ];
 }
 
 /** A single seed cell in the middle: RGB = 0, all other channels = 1. */
