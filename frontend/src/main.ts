@@ -15,6 +15,7 @@ const viewsEl = el<HTMLDivElement>('views');
 const statusEl = el<HTMLSpanElement>('status');
 const perfEl = el<HTMLSpanElement>('perf');
 const modelSelect = el<HTMLSelectElement>('model');
+const engineSelect = el<HTMLSelectElement>('engine');
 const playBtn = el<HTMLButtonElement>('play');
 const stepBtn = el<HTMLButtonElement>('step');
 const resetBtn = el<HTMLButtonElement>('reset');
@@ -47,6 +48,20 @@ let idleWaiters: Array<() => void> = [];
 let selectToken = 0;
 let accumulator = 0;
 let lastT = performance.now();
+
+type Ep = 'webgpu' | 'wasm';
+
+/** Engine from ?ep= (persisted) or localStorage; default WASM (faster on many GPUs). */
+function initialEp(): Ep {
+  const url = new URLSearchParams(location.search).get('ep');
+  if (url === 'webgpu' || url === 'wasm') {
+    localStorage.setItem('nca.ep', url);
+    return url;
+  }
+  return localStorage.getItem('nca.ep') === 'webgpu' ? 'webgpu' : 'wasm';
+}
+
+let ep: Ep = initialEp();
 
 function setBusy(value: boolean): void {
   busy = value;
@@ -387,6 +402,7 @@ function updateInfo(): void {
     ['channels', String(runner.channelN)],
     ['params', m.num_parameters.toLocaleString()],
     ['experiment', m.experiment],
+    ['engine', ep],
     ['fire rate', String(runner.fireRate)],
     ['io', runner.mode],
     ['gpu', runner.adapter],
@@ -415,7 +431,7 @@ async function selectModel(model: ManifestModel): Promise<void> {
   }
   prevPerf = { maskMs: 0, runMs: 0, syncMs: 0, steps: 0 };
   try {
-    runner = await CaRunner.create(model);
+    runner = await CaRunner.create(model, ep);
   } catch (e) {
     setStatus(`failed to load: ${(e as Error).message}`, 'err');
     console.error(e);
@@ -523,6 +539,14 @@ speedInput.addEventListener('input', () => {
 });
 
 modelSelect.addEventListener('change', () => {
+  const m = manifest?.models.find((x) => x.id === modelSelect.value);
+  if (m) void selectModel(m);
+});
+
+engineSelect.value = ep;
+engineSelect.addEventListener('change', () => {
+  ep = engineSelect.value as Ep;
+  localStorage.setItem('nca.ep', ep);
   const m = manifest?.models.find((x) => x.id === modelSelect.value);
   if (m) void selectModel(m);
 });

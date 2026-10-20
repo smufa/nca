@@ -71,15 +71,16 @@ export class CaRunner {
     this.x = seedState(this.channelN, this.grid);
   }
 
-  static async create(model: ManifestModel, seed = 1): Promise<CaRunner> {
-    // ?ep=wasm forces the CPU (WebAssembly) EP; default is WebGPU.
-    const ep = new URLSearchParams(location.search).get('ep');
-    const useWasm = ep === 'wasm' || ep === 'cpu';
+  static async create(
+    model: ManifestModel,
+    ep: 'webgpu' | 'wasm' = 'webgpu',
+    seed = 1,
+  ): Promise<CaRunner> {
     const session = await ort.InferenceSession.create(`/models/${model.path}`, {
-      executionProviders: useWasm ? ['wasm'] : ['webgpu'],
+      executionProviders: ep === 'wasm' ? ['wasm'] : ['webgpu'],
     });
     const runner = new CaRunner(session, model.meta, seed);
-    if (!useWasm) await runner.setupGpu();
+    if (ep === 'webgpu') await runner.setupGpu();
     return runner;
   }
 
