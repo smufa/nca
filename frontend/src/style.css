@@ -273,9 +273,9 @@ button.wide {
 
 .kernel {
   display: grid;
-  grid-template-columns: 46px 1fr;
+  grid-template-columns: 40px 1fr;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .kernel-title {
@@ -294,7 +294,7 @@ button.wide {
 .kgrid input {
   width: 100%;
   min-width: 0;
-  padding: 3px 2px;
+  padding: 3px 1px 3px 3px;
   font-size: 10px;
   text-align: center;
   border: 1px solid var(--border);
@@ -304,18 +304,7 @@ button.wide {
   font-variant-numeric: tabular-nums;
 }
 
-/* Hide the number spinners - they cover the value in these narrow cells. */
-.kgrid input::-webkit-outer-spin-button,
-.kgrid input::-webkit-inner-spin-button {
-  -webkit-appearance: none;
-  margin: 0;
-}
-
-.kgrid input[type='number'] {
-  -moz-appearance: textfield;
-  appearance: textfield;
-}
-
+/* Keep the native number spinners: they now fit next to the value. */
 .kgrid input:focus {
   outline: 1px solid var(--accent);
   outline-offset: -1px;
