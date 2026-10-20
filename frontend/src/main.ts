@@ -16,6 +16,7 @@ const statusEl = el<HTMLSpanElement>('status');
 const perfEl = el<HTMLSpanElement>('perf');
 const modelSelect = el<HTMLSelectElement>('model');
 const engineSelect = el<HTMLSelectElement>('engine');
+const gridSizeSelect = el<HTMLSelectElement>('gridSize');
 const playBtn = el<HTMLButtonElement>('play');
 const stepBtn = el<HTMLButtonElement>('step');
 const resetBtn = el<HTMLButtonElement>('reset');
@@ -176,6 +177,15 @@ function drawView(view: View): void {
 
 function drawAll(): void {
   for (const view of views) drawView(view);
+}
+
+/** Resize every view's canvas/image after a grid change (mappings preserved). */
+function resizeViews(grid: number): void {
+  for (const view of views) {
+    view.canvas.width = grid;
+    view.canvas.height = grid;
+    view.image = view.ctx.createImageData(grid, grid);
+  }
 }
 
 /** Channels a brush stroke affects in a view: the ones it displays, plus alpha. */
@@ -559,6 +569,7 @@ async function selectModel(model: ManifestModel): Promise<void> {
   }
   rebuildViews();
   resetKernelsUI();
+  gridSizeSelect.value = String(runner.grid);
   drawAll();
   updateInfo();
   setStatus(`ready · ${runner.mode === 'gpu' ? 'WebGPU' : 'WASM'}`, 'ok');
@@ -696,6 +707,14 @@ engineSelect.addEventListener('change', () => {
   localStorage.setItem('nca.ep', ep);
   const m = manifest?.models.find((x) => x.id === modelSelect.value);
   if (m) void selectModel(m);
+});
+
+gridSizeSelect.addEventListener('change', () => {
+  if (!runner) return;
+  runner.setGrid(Number(gridSizeSelect.value));
+  resizeViews(runner.grid);
+  drawAll();
+  updateInfo();
 });
 
 window.addEventListener('keydown', (e) => {

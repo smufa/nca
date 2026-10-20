@@ -22,7 +22,7 @@ const STATE_USAGE =
 export class CaRunner {
   readonly meta: ManifestModel['meta'];
   readonly channelN: number;
-  readonly grid: number;
+  grid: number;
   fireRate: number;
   stepCount = 0;
   x: Float32Array;
@@ -111,11 +111,12 @@ export class CaRunner {
     return this.kernels.map((k) => k.slice());
   }
 
-  /** Allocate the GPU buffers and wrap them as ORT tensors. */
+  /** Resolve the GPU device and allocate the buffers (best-effort). */
   private async setupGpu(): Promise<void> {
     try {
       const device = await ort.env.webgpu.device;
       if (!device) return;
+      this.device = device;
 
       const adapter = ort.env.webgpu.adapter as
         | { info?: unknown; adapterInfo?: unknown }
@@ -135,49 +136,89 @@ export class CaRunner {
         : 'unknown';
       console.info('[nca] WebGPU adapter:', this.adapterDesc);
 
-      const { channelN: C, grid: H } = this;
-      const W = H;
-      this.stateBytes = C * H * W * 4;
-
-      const alloc = (bytes: number, usage: number): GPUBuffer =>
-        device.createBuffer({ size: Math.ceil(bytes / 16) * 16, usage });
-
-      this.bufA = alloc(this.stateBytes, STATE_USAGE);
-      this.bufB = alloc(this.stateBytes, STATE_USAGE);
-      this.maskBuf = alloc(
-        H * W * 4,
-        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      );
-      this.weightBuf = alloc(
-        3 * C * 9 * 4,
-        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      );
-      this.staging = alloc(
-        this.stateBytes,
-        GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-      );
-
-      const dims = [1, C, H, W];
-      this.tensorA = ort.Tensor.fromGpuBuffer(this.bufA, { dataType: 'float32', dims });
-      this.tensorB = ort.Tensor.fromGpuBuffer(this.bufB, { dataType: 'float32', dims });
-      this.maskTensor = ort.Tensor.fromGpuBuffer(this.maskBuf, {
-        dataType: 'float32',
-        dims: [1, 1, H, W],
-      });
-      this.weightTensor = ort.Tensor.fromGpuBuffer(this.weightBuf, {
-        dataType: 'float32',
-        dims: [3 * C, 1, 3, 3],
-      });
-      this.stepTensor = new ort.Tensor('float32', new Float32Array([1]), []);
-
-      device.queue.writeBuffer(this.weightBuf, 0, this.weight);
-      this.device = device;
-      this.useGpu = true;
-      this.uploadState();
+      this.allocGpu();
+      this.reset();
     } catch (e) {
       console.warn('GPU IO binding unavailable; falling back to CPU tensors', e);
-      this.useGpu = false;
+      this.freeGpu();
     }
+  }
+
+  /** Allocate state/mask/weight buffers + tensors for the current grid. */
+  private allocGpu(): void {
+    const device = this.device;
+    if (!device) return;
+    const { channelN: C, grid: H } = this;
+    const W = H;
+    this.stateBytes = C * H * W * 4;
+
+    const alloc = (bytes: number, usage: number): GPUBuffer =>
+      device.createBuffer({ size: Math.ceil(bytes / 16) * 16, usage });
+
+    this.bufA = alloc(this.stateBytes, STATE_USAGE);
+    this.bufB = alloc(this.stateBytes, STATE_USAGE);
+    this.maskBuf = alloc(H * W * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    this.weightBuf = alloc(3 * C * 9 * 4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+    this.staging = alloc(
+      this.stateBytes,
+      GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    );
+
+    const dims = [1, C, H, W];
+    this.tensorA = ort.Tensor.fromGpuBuffer(this.bufA, { dataType: 'float32', dims });
+    this.tensorB = ort.Tensor.fromGpuBuffer(this.bufB, { dataType: 'float32', dims });
+    this.maskTensor = ort.Tensor.fromGpuBuffer(this.maskBuf, {
+      dataType: 'float32',
+      dims: [1, 1, H, W],
+    });
+    this.weightTensor = ort.Tensor.fromGpuBuffer(this.weightBuf, {
+      dataType: 'float32',
+      dims: [3 * C, 1, 3, 3],
+    });
+    this.stepTensor = new ort.Tensor('float32', new Float32Array([1]), []);
+
+    device.queue.writeBuffer(this.weightBuf, 0, this.weight);
+    this.useGpu = true;
+  }
+
+  private freeGpu(): void {
+    this.bufA?.destroy();
+    this.bufB?.destroy();
+    this.maskBuf?.destroy();
+    this.weightBuf?.destroy();
+    this.staging?.destroy();
+    this.bufA = null;
+    this.bufB = null;
+    this.maskBuf = null;
+    this.weightBuf = null;
+    this.staging = null;
+    this.tensorA = null;
+    this.tensorB = null;
+    this.maskTensor = null;
+    this.weightTensor = null;
+    this.stepTensor = null;
+    this.useGpu = false;
+  }
+
+  /**
+   * Run the CA on a different grid size. The ONNX model has dynamic H/W, so no
+   * session rebuild is needed - we just reallocate buffers and reseed.
+   */
+  setGrid(size: number): void {
+    if (size === this.grid) return;
+    this.grid = size;
+    this.mask = new Float32Array(size * size);
+    this.queuedEdits = [];
+    if (this.device) {
+      try {
+        this.freeGpu();
+        this.allocGpu();
+      } catch (e) {
+        console.warn('failed to resize GPU buffers; using CPU tensors', e);
+        this.freeGpu();
+      }
+    }
+    this.reset();
   }
 
   /** Restore the single-cell seed state. */
@@ -294,14 +335,7 @@ export class CaRunner {
   }
 
   async dispose(): Promise<void> {
-    if (this.useGpu) {
-      this.bufA?.destroy();
-      this.bufB?.destroy();
-      this.maskBuf?.destroy();
-      this.weightBuf?.destroy();
-      this.staging?.destroy();
-      this.useGpu = false;
-    }
+    this.freeGpu();
     await this.session.release();
   }
 }
