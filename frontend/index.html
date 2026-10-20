@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NCA Playground</title>
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <h1>Neural Cellular Automata</h1>
+        <span id="status" class="status">loading…</span>
+      </header>
+      <main>
+        <div class="stage">
+          <div id="views" class="views"></div>
+        </div>
+        <aside class="panel">
+          <label class="field">
+            <span>Model</span>
+            <select id="model"></select>
+          </label>
+
+          <div class="buttons">
+            <button id="play" class="primary">Play</button>
+            <button id="step">Step</button>
+            <button id="reset">Reset</button>
+          </div>
+
+          <label class="field">
+            <span>Speed <b id="speedVal">30</b> steps/s</span>
+            <input id="speed" type="range" min="1" max="120" value="30" />
+          </label>
+
+          <button id="addView" class="wide">+ Add channel view</button>
+
+          <dl id="info" class="info"></dl>
+        </aside>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

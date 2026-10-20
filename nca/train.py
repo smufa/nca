@@ -1,0 +1,195 @@
+"""Training loop for the Neural CA.
+
+Implements the "sample pool" + damage strategy from the paper, plus the
+per-variable gradient normalisation that stabilises training.
+"""
+
+from __future__ import annotations
+
+import random
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+
+from .model import NeuralCA
+from .pool import SamplePool
+from .viz import growth_frames, plot_loss, render, save_gif, save_image, tile
+
+
+@dataclass
+class TrainConfig:
+    iterations: int = 2000
+    batch_size: int = 8
+    pool_size: int = 1024
+    use_pool: bool = True
+    damage_n: int = 3
+    train_steps_min: int = 64
+    train_steps_max: int = 96
+    lr: float = 2e-3
+    lr_milestones: tuple[int, ...] = (2000,)
+    lr_gamma: float = 0.1
+    normalize_grads: bool = True
+    log_every: int = 10
+    ckpt_every: int = 100
+    gif_steps: int = 120
+    gif_frame_every: int = 2
+    gif_scale: int = 3
+    make_gif: bool = True
+    seed: int = 0
+
+
+def per_sample_loss(x: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """MSE over the RGBA channels, reduced to ``[B]``."""
+    diff = x[:, :4] - target
+    return (diff * diff).mean(dim=(1, 2, 3))
+
+
+def loss_fn(x: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    return per_sample_loss(x, target).mean()
+
+
+def make_circle_masks(
+    n: int, h: int, w: int, generator: torch.Generator | None = None
+) -> torch.Tensor:
+    """Random circular damage masks, shape ``[n, h, w]`` (1 = keep)."""
+    x = torch.linspace(-1.0, 1.0, w)[None, None, :]
+    y = torch.linspace(-1.0, 1.0, h)[None, :, None]
+    center = torch.rand(2, n, 1, 1, generator=generator) - 0.5
+    r = torch.rand(n, 1, 1, generator=generator) * 0.3 + 0.1
+    x = (x - center[0]) / r
+    y = (y - center[1]) / r
+    return (x * x + y * y < 1.0).float()
+
+
+def _train_step(
+    ca: NeuralCA,
+    optimizer: torch.optim.Optimizer,
+    x0: torch.Tensor,
+    target: torch.Tensor,
+    cfg: TrainConfig,
+    generator: torch.Generator,
+) -> tuple[torch.Tensor, float]:
+    n = int(
+        torch.randint(cfg.train_steps_min, cfg.train_steps_max, (1,), generator=generator)
+    )
+    x = x0
+    for _ in range(n):
+        x = ca(x)
+    loss = loss_fn(x, target)
+
+    optimizer.zero_grad(set_to_none=True)
+    loss.backward()
+    if cfg.normalize_grads:
+        for p in ca.parameters():
+            if p.grad is not None:
+                p.grad /= p.grad.norm() + 1e-8
+    optimizer.step()
+    return x.detach(), float(loss.item())
+
+
+def train(
+    ca: NeuralCA,
+    target: torch.Tensor,
+    seed: torch.Tensor,
+    cfg: TrainConfig,
+    device: torch.device,
+    out_dir: Path,
+) -> list[float]:
+    """Train ``ca`` in place and return the loss history."""
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    random.seed(cfg.seed)
+    np.random.seed(cfg.seed)
+    torch.manual_seed(cfg.seed)
+    generator = torch.Generator(device="cpu").manual_seed(cfg.seed)
+
+    ca.to(device)
+    target = target.to(device)
+    seed = seed.to(device)
+    _, h, w = seed.shape
+
+    optimizer = torch.optim.Adam(ca.parameters(), lr=cfg.lr)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(
+        optimizer, milestones=list(cfg.lr_milestones), gamma=cfg.lr_gamma
+    )
+
+    pool = None
+    if cfg.use_pool:
+        pool = SamplePool(seed.unsqueeze(0).repeat(cfg.pool_size, 1, 1, 1).contiguous())
+
+    # Keep at least one slot (the seed) untouched by damage.
+    damage_n = min(cfg.damage_n, max(cfg.batch_size - 1, 0))
+    if damage_n != cfg.damage_n:
+        print(f"note: clamping damage_n {cfg.damage_n} -> {damage_n} (batch_size={cfg.batch_size})")
+
+    losses: list[float] = []
+    start = time.time()
+
+    print(
+        f"Training on {device} | grid {h}x{w} | {ca.num_parameters} params | "
+        f"pool={cfg.use_pool} damage={cfg.damage_n} | {cfg.iterations} iters"
+    )
+
+    for step in range(cfg.iterations):
+        if pool is not None:
+            idx, x0 = pool.sample(cfg.batch_size, generator)
+            with torch.no_grad():
+                rank = per_sample_loss(x0, target).argsort(descending=True)
+            x0 = x0[rank]
+            idx = idx[rank]
+            # Always include the original seed so the model never forgets how
+            # to grow from scratch.
+            x0[0] = seed
+            if damage_n:
+                masks = make_circle_masks(damage_n, h, w, generator).to(device)
+                x0[-damage_n:] *= (1.0 - masks).unsqueeze(1)
+        else:
+            x0 = seed.unsqueeze(0).repeat(cfg.batch_size, 1, 1, 1).contiguous()
+
+        x, loss = _train_step(ca, optimizer, x0, target, cfg, generator)
+        scheduler.step()
+
+        if pool is not None:
+            pool.commit(idx, x)
+
+        losses.append(loss)
+
+        if step % cfg.log_every == 0 or step == cfg.iterations - 1:
+            elapsed = time.time() - start
+            rate = (step + 1) / elapsed
+            eta = (cfg.iterations - step - 1) / rate if rate > 0 else float("inf")
+            print(
+                f"step {step + 1:6d}/{cfg.iterations} | loss {loss:.6f} "
+                f"| log10 {np.log10(max(loss, 1e-12)):+.3f} "
+                f"| {rate:.2f} it/s | eta {eta / 60:.1f} min"
+            )
+            before = render(x0)
+            after = render(x)
+            montage = np.vstack([tile(before, ncols=cfg.batch_size), tile(after, ncols=cfg.batch_size)])
+            save_image(montage, out_dir / "progress" / f"batch_{step:06d}.png")
+
+        if cfg.ckpt_every and (step + 1) % cfg.ckpt_every == 0:
+            torch.save(ca.state_dict(), out_dir / f"ckpt_{step + 1:06d}.pt")
+
+    torch.save(ca.state_dict(), out_dir / "ckpt_final.pt")
+    plot_loss(losses, out_dir / "loss.png")
+
+    if cfg.make_gif:
+        print("Rendering growth animation...")
+        frames = growth_frames(
+            ca,
+            seed,
+            steps=cfg.gif_steps,
+            device=device,
+            frame_every=cfg.gif_frame_every,
+            scale=cfg.gif_scale,
+        )
+        save_gif(frames, out_dir / "growth.gif")
+
+    print(f"Done in {(time.time() - start) / 60:.1f} min. Outputs in {out_dir}")
+    return losses
