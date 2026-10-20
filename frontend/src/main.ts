@@ -67,6 +67,7 @@ let perfFrames = 0;
 let perfSteps = 0;
 let perfStepMs = 0;
 let perfTime = performance.now();
+let prevPerf = { maskMs: 0, runMs: 0, syncMs: 0, steps: 0 };
 
 function maybeUpdatePerf(): void {
   const now = performance.now();
@@ -77,6 +78,18 @@ function maybeUpdatePerf(): void {
     `${((perfSteps * 1000) / dt).toFixed(1)} steps/s`,
   ];
   if (perfSteps > 0) parts.push(`${(perfStepMs / perfSteps).toFixed(1)} ms/step`);
+  if (runner) {
+    const p = runner.perf;
+    const n = p.steps - prevPerf.steps;
+    if (n > 0) {
+      parts.push(
+        `run ${((p.runMs - prevPerf.runMs) / n).toFixed(1)}` +
+          ` · sync ${((p.syncMs - prevPerf.syncMs) / n).toFixed(1)}` +
+          ` · mask ${((p.maskMs - prevPerf.maskMs) / n).toFixed(1)} ms`,
+      );
+    }
+    prevPerf = { ...p };
+  }
   perfEl.textContent = parts.join(' · ');
   perfFrames = 0;
   perfSteps = 0;
@@ -399,6 +412,7 @@ async function selectModel(model: ManifestModel): Promise<void> {
     await runner.dispose();
     runner = null;
   }
+  prevPerf = { maskMs: 0, runMs: 0, syncMs: 0, steps: 0 };
   try {
     runner = await CaRunner.create(model);
   } catch (e) {

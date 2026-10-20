@@ -26,6 +26,8 @@ export class CaRunner {
   fireRate: number;
   stepCount = 0;
   x: Float32Array;
+  /** Cumulative step timings (ms) + step count, for the perf readout. */
+  readonly perf = { maskMs: 0, runMs: 0, syncMs: 0, steps: 0 };
 
   private session: ort.InferenceSession;
   private weight: Float32Array;
@@ -181,6 +183,7 @@ export class CaRunner {
     const buf = this.cur === 0 ? this.bufA : this.bufB;
     if (!buf) return;
 
+    const t0 = performance.now();
     const encoder = this.device.createCommandEncoder();
     encoder.copyBufferToBuffer(buf, 0, this.staging, 0, this.stateBytes);
     this.device.queue.submit([encoder.finish()]);
@@ -189,6 +192,7 @@ export class CaRunner {
       this.staging.getMappedRange(0, this.stateBytes).slice(0),
     );
     this.staging.unmap();
+    this.perf.syncMs += performance.now() - t0;
   }
 
   /** Advance the CA by one step. */
@@ -197,20 +201,28 @@ export class CaRunner {
     const W = H;
     const plane = H * W;
 
+    const tMask = performance.now();
     for (let i = 0; i < plane; i++) {
       this.mask[i] = this.rng() < this.fireRate ? 1 : 0;
     }
+    const gpu =
+      this.useGpu &&
+      this.device !== null &&
+      this.maskBuf !== null &&
+      this.maskTensor !== null;
+    if (gpu) this.device!.queue.writeBuffer(this.maskBuf!, 0, this.mask);
+    this.perf.maskMs += performance.now() - tMask;
 
     this.stepping = true;
+    const tRun = performance.now();
     try {
-      if (this.useGpu && this.device && this.maskBuf && this.maskTensor) {
-        this.device.queue.writeBuffer(this.maskBuf, 0, this.mask);
+      if (gpu) {
         const inTensor = this.cur === 0 ? this.tensorA : this.tensorB;
         const outTensor = this.cur === 0 ? this.tensorB : this.tensorA;
         const feeds: Record<string, ort.Tensor> = {
           x: inTensor!,
           perception_weight: this.weightTensor!,
-          fire_mask: this.maskTensor,
+          fire_mask: this.maskTensor!,
           step_size: this.stepTensor!,
         };
         // Pre-allocated output: ORT writes straight into our other state buffer.
@@ -229,8 +241,10 @@ export class CaRunner {
     } finally {
       this.stepping = false;
     }
+    this.perf.runMs += performance.now() - tRun;
 
     await this.flushEdits();
+    this.perf.steps++;
     this.stepCount++;
   }
 
