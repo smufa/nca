@@ -30,6 +30,8 @@ PARTITION="${PARTITION:-gpu}"
 CONSTRAINT="${CONSTRAINT:-h100}"
 GRES="${GRES:-gpu:1}"
 TIME="${TIME:-12:00:00}"
+MEM="${MEM:-64G}"
+CPUS="${CPUS:-8}"
 
 if [[ $# -gt 0 ]]; then
   names=("$@")
@@ -41,6 +43,7 @@ for name in "${names[@]}"; do
   code="${TARGETS[$name]:?unknown target '$name'}"
   for exp in "${EXPERIMENTS[@]}"; do
     sbatch -p "$PARTITION" --constraint="$CONSTRAINT" --gres="$GRES" --time="$TIME" \
+      --mem="$MEM" --cpus-per-task="$CPUS" \
       slurm/train.sbatch \
       --target "emoji:${code}" \
       --experiment "$exp" \
