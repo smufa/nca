@@ -39,6 +39,17 @@ interface View {
   selects: Record<'r' | 'g' | 'b' | 'a' | 'bg', HTMLSelectElement>;
 }
 
+/** An in-progress brush stroke. Applied every frame while the button is held. */
+interface Stroke {
+  view: View;
+  pointerId: number;
+  lastX: number;
+  lastY: number;
+  curX: number;
+  curY: number;
+}
+let stroke: Stroke | null = null;
+
 let manifest: Manifest | null = null;
 let runner: CaRunner | null = null;
 let views: View[] = [];
@@ -168,7 +179,7 @@ function brushTargets(view: View): number[] {
 }
 
 /** Apply the active tool to a disc of `brushRadius` cells centred on (cx, cy). */
-function paintDot(view: View, cx: number, cy: number, painted: Set<number>): void {
+function paintDot(view: View, cx: number, cy: number): void {
   if (!runner || tool === 'none') return;
   const grid = runner.grid;
   const plane = grid * grid;
@@ -188,8 +199,6 @@ function paintDot(view: View, cx: number, cy: number, painted: Set<number>): voi
       const dy = y - cy;
       if (dx * dx + dy * dy > r2) continue;
       const i = y * grid + x;
-      if (painted.has(i)) continue; // at most once per cell per stroke
-      painted.add(i);
       for (const c of targets) indices.push(c * plane + i);
     }
   }
@@ -213,7 +222,6 @@ function paintLine(
   y0: number,
   x1: number,
   y1: number,
-  painted: Set<number>,
 ): void {
   const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
   for (let i = 0; i <= n; i++) {
@@ -222,9 +230,15 @@ function paintLine(
       view,
       Math.round(x0 + (x1 - x0) * t),
       Math.round(y0 + (y1 - y0) * t),
-      painted,
     );
   }
+}
+
+/** Re-apply the brush at the held position every frame. */
+function tickStroke(): void {
+  if (!stroke || !runner) return;
+  paintDot(stroke.view, stroke.curX, stroke.curY);
+  drawAll();
 }
 
 function createView(mapping: ChannelMapping): View {
@@ -326,8 +340,6 @@ function createView(mapping: ChannelMapping): View {
   canvas.style.cursor = tool === 'none' ? 'default' : 'crosshair';
 
   let painting = false;
-  let lastCell: [number, number] | null = null;
-  let painted = new Set<number>();
 
   const toCell = (e: PointerEvent): [number, number] => {
     const rect = canvas.getBoundingClientRect();
@@ -342,26 +354,27 @@ function createView(mapping: ChannelMapping): View {
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
     painting = true;
-    painted = new Set<number>();
     const [cx, cy] = toCell(e);
-    lastCell = [cx, cy];
-    paintDot(view, cx, cy, painted);
+    stroke = { view, pointerId: e.pointerId, lastX: cx, lastY: cy, curX: cx, curY: cy };
+    paintDot(view, cx, cy);
     drawAll();
   });
 
   canvas.addEventListener('pointermove', (e) => {
-    if (!painting || !runner) return;
+    if (!painting || !stroke || stroke.view !== view || !runner) return;
     const [cx, cy] = toCell(e);
-    if (lastCell) paintLine(view, lastCell[0], lastCell[1], cx, cy, painted);
-    else paintDot(view, cx, cy, painted);
-    lastCell = [cx, cy];
+    paintLine(view, stroke.lastX, stroke.lastY, cx, cy);
+    stroke.lastX = cx;
+    stroke.lastY = cy;
+    stroke.curX = cx;
+    stroke.curY = cy;
     drawAll();
   });
 
   const endStroke = (e: PointerEvent): void => {
     if (!painting) return;
     painting = false;
-    lastCell = null;
+    if (stroke && stroke.view === view && stroke.pointerId === e.pointerId) stroke = null;
     if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
   };
   canvas.addEventListener('pointerup', endStroke);
@@ -568,6 +581,7 @@ async function frame(t: number): Promise<void> {
   requestAnimationFrame(frame);
   perfFrames++;
   maybeUpdatePerf();
+  tickStroke();
   const dt = Math.min((t - lastT) / 1000, 0.1);
   lastT = t;
   if (!playing || !runner || busy) return;
