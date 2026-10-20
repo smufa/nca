@@ -42,8 +42,25 @@ let runner: CaRunner | null = null;
 let views: View[] = [];
 let playing = false;
 let busy = false;
+let idleWaiters: Array<() => void> = [];
+let selectToken = 0;
 let accumulator = 0;
 let lastT = performance.now();
+
+function setBusy(value: boolean): void {
+  busy = value;
+  if (!value) {
+    const waiters = idleWaiters;
+    idleWaiters = [];
+    for (const w of waiters) w();
+  }
+}
+
+/** Resolves once no step is in flight (used before releasing a session). */
+function whenIdle(): Promise<void> {
+  if (!busy) return Promise.resolve();
+  return new Promise((resolve) => idleWaiters.push(resolve));
+}
 
 type Tool = 'none' | 'one' | 'zero' | 'mul';
 let tool: Tool = 'none';
@@ -344,9 +361,17 @@ function updateInfo(): void {
 }
 
 async function selectModel(model: ManifestModel): Promise<void> {
+  const token = ++selectToken;
   playing = false;
   playBtn.textContent = 'Play';
   setStatus(`loading ${model.id}…`, 'warn');
+
+  // Let any in-flight step finish before releasing the old session, otherwise
+  // ORT unmaps a GPU buffer mid-download ("Buffer was unmapped before mapping
+  // was resolved").
+  await whenIdle();
+  if (token !== selectToken) return; // superseded by a newer selection
+
   if (runner) {
     await runner.dispose();
     runner = null;
@@ -434,9 +459,15 @@ playBtn.addEventListener('click', () => {
 
 stepBtn.addEventListener('click', async () => {
   if (!runner || busy) return;
-  busy = true;
-  await runner.step();
-  busy = false;
+  setBusy(true);
+  try {
+    await runner.step();
+  } catch (e) {
+    console.error(e);
+    setStatus(`step failed: ${(e as Error).message}`, 'err');
+  } finally {
+    setBusy(false);
+  }
   drawAll();
   updateInfo();
 });
@@ -482,9 +513,17 @@ async function frame(t: number): Promise<void> {
   accumulator -= n;
   n = Math.min(n, 24);
 
-  busy = true;
-  for (let i = 0; i < n; i++) await runner.step();
-  busy = false;
+  setBusy(true);
+  try {
+    for (let i = 0; i < n; i++) await runner.step();
+  } catch (e) {
+    console.error(e);
+    setStatus(`step failed: ${(e as Error).message}`, 'err');
+    playing = false;
+    playBtn.textContent = 'Play';
+  } finally {
+    setBusy(false);
+  }
   drawAll();
   updateInfo();
 }
