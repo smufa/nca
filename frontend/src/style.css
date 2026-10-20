@@ -77,6 +77,72 @@ main {
   min-height: 0;
 }
 
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.tools {
+  display: flex;
+  gap: 4px;
+}
+
+.tools button {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.tools button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #06102a;
+  font-weight: 600;
+}
+
+.tfield {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tfield b {
+  color: var(--text);
+  min-width: 16px;
+}
+
+.tfield input[type='range'] {
+  width: 120px;
+}
+
+.tfield input[type='number'] {
+  width: 64px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 6px;
+  font: inherit;
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: auto;
+}
+
 .views {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 320px));

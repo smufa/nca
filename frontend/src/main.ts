@@ -21,6 +21,11 @@ const speedInput = el<HTMLInputElement>('speed');
 const speedVal = el<HTMLElement>('speedVal');
 const infoEl = el<HTMLDListElement>('info');
 const addViewBtn = el<HTMLButtonElement>('addView');
+const toolsEl = el<HTMLDivElement>('tools');
+const brushRadiusInput = el<HTMLInputElement>('brushRadius');
+const brushRadiusVal = el<HTMLElement>('brushRadiusVal');
+const brushFactorInput = el<HTMLInputElement>('brushFactor');
+const brushAlphaInput = el<HTMLInputElement>('brushAlpha');
 
 /** A render panel: its own canvas + channel mapping selectors. */
 interface View {
@@ -39,6 +44,12 @@ let playing = false;
 let busy = false;
 let accumulator = 0;
 let lastT = performance.now();
+
+type Tool = 'none' | 'one' | 'zero' | 'mul';
+let tool: Tool = 'none';
+let brushRadius = Number(brushRadiusInput.value);
+let brushFactor = Number(brushFactorInput.value);
+let brushAlpha = brushAlphaInput.checked;
 
 function setStatus(text: string, kind: 'ok' | 'warn' | 'err' = 'ok'): void {
   statusEl.textContent = text;
@@ -79,6 +90,67 @@ function drawView(view: View): void {
 
 function drawAll(): void {
   for (const view of views) drawView(view);
+}
+
+/** Channels a brush stroke affects in a view: the ones it displays, plus alpha. */
+function brushTargets(view: View): number[] {
+  if (!runner) return [];
+  const set = new Set<number>([view.mapping.r, view.mapping.g, view.mapping.b]);
+  if (brushAlpha) set.add(3);
+  return [...set].filter((c) => c >= 0 && c < runner!.channelN);
+}
+
+/** Apply the active tool to a disc of `brushRadius` cells centred on (cx, cy). */
+function paintDot(view: View, cx: number, cy: number, painted: Set<number>): void {
+  if (!runner || tool === 'none') return;
+  const grid = runner.grid;
+  const plane = grid * grid;
+  const targets = brushTargets(view);
+  if (targets.length === 0) return;
+
+  const r2 = brushRadius * brushRadius;
+  const y0 = Math.max(0, cy - brushRadius);
+  const y1 = Math.min(grid - 1, cy + brushRadius);
+  const x0 = Math.max(0, cx - brushRadius);
+  const x1 = Math.min(grid - 1, cx + brushRadius);
+
+  for (let y = y0; y <= y1; y++) {
+    for (let x = x0; x <= x1; x++) {
+      const dx = x - cx;
+      const dy = y - cy;
+      if (dx * dx + dy * dy > r2) continue;
+      const i = y * grid + x;
+      if (painted.has(i)) continue; // at most once per cell per stroke
+      painted.add(i);
+      for (const c of targets) {
+        const idx = c * plane + i;
+        if (tool === 'one') runner.x[idx] = 1;
+        else if (tool === 'zero') runner.x[idx] = 0;
+        else runner.x[idx] *= brushFactor;
+      }
+    }
+  }
+}
+
+/** Interpolate a stroke between two cells so fast drags leave no gaps. */
+function paintLine(
+  view: View,
+  x0: number,
+  y0: number,
+  x1: number,
+  y1: number,
+  painted: Set<number>,
+): void {
+  const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0), 1);
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    paintDot(
+      view,
+      Math.round(x0 + (x1 - x0) * t),
+      Math.round(y0 + (y1 - y0) * t),
+      painted,
+    );
+  }
 }
 
 function createView(mapping: ChannelMapping): View {
@@ -176,6 +248,51 @@ function createView(mapping: ChannelMapping): View {
     root.remove();
   });
 
+  canvas.style.touchAction = 'none';
+  canvas.style.cursor = tool === 'none' ? 'default' : 'crosshair';
+
+  let painting = false;
+  let lastCell: [number, number] | null = null;
+  let painted = new Set<number>();
+
+  const toCell = (e: PointerEvent): [number, number] => {
+    const rect = canvas.getBoundingClientRect();
+    const g = runner!.grid;
+    const cx = Math.floor(((e.clientX - rect.left) / rect.width) * g);
+    const cy = Math.floor(((e.clientY - rect.top) / rect.height) * g);
+    return [Math.max(0, Math.min(g - 1, cx)), Math.max(0, Math.min(g - 1, cy))];
+  };
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (tool === 'none' || !runner) return;
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    painting = true;
+    painted = new Set<number>();
+    const [cx, cy] = toCell(e);
+    lastCell = [cx, cy];
+    paintDot(view, cx, cy, painted);
+    drawAll();
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!painting || !runner) return;
+    const [cx, cy] = toCell(e);
+    if (lastCell) paintLine(view, lastCell[0], lastCell[1], cx, cy, painted);
+    else paintDot(view, cx, cy, painted);
+    lastCell = [cx, cy];
+    drawAll();
+  });
+
+  const endStroke = (e: PointerEvent): void => {
+    if (!painting) return;
+    painting = false;
+    lastCell = null;
+    if (canvas.hasPointerCapture(e.pointerId)) canvas.releasePointerCapture(e.pointerId);
+  };
+  canvas.addEventListener('pointerup', endStroke);
+  canvas.addEventListener('pointercancel', endStroke);
+
   views.push(view);
   return view;
 }
@@ -263,6 +380,35 @@ async function loadModels(): Promise<void> {
     setStatus('no models in manifest', 'warn');
   }
 }
+
+function updateCursors(): void {
+  for (const v of views) {
+    v.canvas.style.cursor = tool === 'none' ? 'default' : 'crosshair';
+  }
+}
+
+toolsEl.addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button');
+  if (!btn) return;
+  tool = (btn.dataset.tool as Tool) ?? 'none';
+  for (const b of toolsEl.querySelectorAll('button')) {
+    b.classList.toggle('active', b === btn);
+  }
+  updateCursors();
+});
+
+brushRadiusInput.addEventListener('input', () => {
+  brushRadius = Number(brushRadiusInput.value);
+  brushRadiusVal.textContent = String(brushRadius);
+});
+
+brushFactorInput.addEventListener('input', () => {
+  brushFactor = Number(brushFactorInput.value);
+});
+
+brushAlphaInput.addEventListener('change', () => {
+  brushAlpha = brushAlphaInput.checked;
+});
 
 addViewBtn.addEventListener('click', () => {
   if (!runner) return;

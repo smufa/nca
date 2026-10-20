@@ -13,6 +13,28 @@
       </header>
       <main>
         <div class="stage">
+          <div class="toolbar">
+            <div class="tools" id="tools">
+              <button data-tool="none" class="active" title="Inspect only">View</button>
+              <button data-tool="one" title="Set pixels to 1">Set 1</button>
+              <button data-tool="zero" title="Set pixels to 0">Set 0</button>
+              <button data-tool="mul" title="Multiply pixels by a factor">×</button>
+            </div>
+            <label class="tfield">
+              radius
+              <input id="brushRadius" type="range" min="1" max="24" value="4" />
+              <b id="brushRadiusVal">4</b>
+            </label>
+            <label class="tfield">
+              factor
+              <input id="brushFactor" type="number" step="0.1" value="0.5" />
+            </label>
+            <label class="tfield">
+              <input id="brushAlpha" type="checkbox" checked />
+              alpha
+            </label>
+            <span class="hint">edits the channels shown in each window</span>
+          </div>
           <div id="views" class="views"></div>
         </div>
         <aside class="panel">
