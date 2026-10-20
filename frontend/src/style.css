@@ -267,20 +267,22 @@ button.wide {
 
 .kernel-grids {
   display: flex;
+  flex-direction: column;
   gap: 8px;
-  justify-content: space-between;
 }
 
 .kernel {
-  flex: 1;
-  min-width: 0;
+  display: grid;
+  grid-template-columns: 46px 1fr;
+  align-items: center;
+  gap: 8px;
 }
 
 .kernel-title {
   font-size: 10px;
   color: var(--muted);
-  text-align: center;
-  margin-bottom: 3px;
+  text-align: right;
+  margin: 0;
 }
 
 .kgrid {
@@ -300,6 +302,23 @@ button.wide {
   background: var(--panel-2);
   color: var(--text);
   font-variant-numeric: tabular-nums;
+}
+
+/* Hide the number spinners - they cover the value in these narrow cells. */
+.kgrid input::-webkit-outer-spin-button,
+.kgrid input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.kgrid input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+.kgrid input:focus {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
 }
 
 .kgrid input:disabled {
