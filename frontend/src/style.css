@@ -63,6 +63,13 @@ header h1 {
   color: var(--err);
 }
 
+.perf {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
 main {
   flex: 1;
   display: grid;

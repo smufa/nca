@@ -13,6 +13,7 @@ function el<T extends HTMLElement>(id: string): T {
 
 const viewsEl = el<HTMLDivElement>('views');
 const statusEl = el<HTMLSpanElement>('status');
+const perfEl = el<HTMLSpanElement>('perf');
 const modelSelect = el<HTMLSelectElement>('model');
 const playBtn = el<HTMLButtonElement>('play');
 const stepBtn = el<HTMLButtonElement>('step');
@@ -60,6 +61,27 @@ function setBusy(value: boolean): void {
 function whenIdle(): Promise<void> {
   if (!busy) return Promise.resolve();
   return new Promise((resolve) => idleWaiters.push(resolve));
+}
+
+let perfFrames = 0;
+let perfSteps = 0;
+let perfStepMs = 0;
+let perfTime = performance.now();
+
+function maybeUpdatePerf(): void {
+  const now = performance.now();
+  const dt = now - perfTime;
+  if (dt < 500) return;
+  const parts = [
+    `${((perfFrames * 1000) / dt).toFixed(0)} fps`,
+    `${((perfSteps * 1000) / dt).toFixed(1)} steps/s`,
+  ];
+  if (perfSteps > 0) parts.push(`${(perfStepMs / perfSteps).toFixed(1)} ms/step`);
+  perfEl.textContent = parts.join(' · ');
+  perfFrames = 0;
+  perfSteps = 0;
+  perfStepMs = 0;
+  perfTime = now;
 }
 
 type Tool = 'none' | 'one' | 'zero' | 'mul';
@@ -503,6 +525,8 @@ window.addEventListener('keydown', (e) => {
 
 async function frame(t: number): Promise<void> {
   requestAnimationFrame(frame);
+  perfFrames++;
+  maybeUpdatePerf();
   const dt = Math.min((t - lastT) / 1000, 0.1);
   lastT = t;
   if (!playing || !runner || busy) return;
@@ -514,8 +538,13 @@ async function frame(t: number): Promise<void> {
   n = Math.min(n, 24);
 
   setBusy(true);
+  const t0 = performance.now();
+  let done = 0;
   try {
-    for (let i = 0; i < n; i++) await runner.step();
+    for (let i = 0; i < n; i++) {
+      await runner.step();
+      done++;
+    }
   } catch (e) {
     console.error(e);
     setStatus(`step failed: ${(e as Error).message}`, 'err');
@@ -524,6 +553,8 @@ async function frame(t: number): Promise<void> {
   } finally {
     setBusy(false);
   }
+  perfSteps += done;
+  perfStepMs += performance.now() - t0;
   drawAll();
   updateInfo();
 }
