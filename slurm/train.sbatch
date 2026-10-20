@@ -22,6 +22,9 @@ set -euo pipefail
 
 cd "${SLURM_SUBMIT_DIR:?run this with sbatch from the repo root}"
 source .venv/bin/activate
+# The cluster's Lmod environment injects a Python 3.12 site-packages tree via
+# PYTHONPATH, which shadows the venv's packages (numpy/torch). Drop it.
+unset PYTHONPATH PYTHONHOME
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 
 echo "job ${SLURM_JOB_ID} on $(hostname) | $(date -Is)"
