@@ -21,7 +21,9 @@ class SamplePool:
 
     def sample(self, n: int, generator: torch.Generator | None = None):
         """Return ``(indices, batch)`` for ``n`` distinct pool entries."""
-        idx = torch.randperm(len(self.x), generator=generator, device=self.x.device)[:n]
+        # randperm uses the (CPU) generator for reproducibility, then the indices
+        # are moved to the pool's device (the pool may live on CUDA).
+        idx = torch.randperm(len(self.x), generator=generator)[:n].to(self.x.device)
         return idx, self.x[idx].clone()
 
     def commit(self, idx: torch.Tensor, x: torch.Tensor) -> None:
