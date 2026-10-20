@@ -96,8 +96,8 @@ Any number of **channel-mapping views** can be added; each maps any three state
 channels to R/G/B and optionally composites with an alpha channel over a white or
 black background. The first view defaults to channels 0/1/2 with alpha 3 over
 white, so the default look is the usual RGB pattern. The models are served from
-`../exports` via Vite's `publicDir`, so run `uv run python -m nca.export ...`
-first.
+`../exports` at `/models` by a small Vite plugin (Vite ignores a `publicDir`
+outside the project root), so run `uv run python -m nca.export ...` first.
 
 > Requires a WebGPU-capable browser (Chrome/Edge 113+). If WebGPU is unavailable
 the app reports it in the status bar.

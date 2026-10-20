@@ -43,7 +43,7 @@ export class CaRunner {
   }
 
   static async create(model: ManifestModel, seed = 1): Promise<CaRunner> {
-    const session = await ort.InferenceSession.create(`/${model.path}`, {
+    const session = await ort.InferenceSession.create(`/models/${model.path}`, {
       executionProviders: ['webgpu'],
     });
     return new CaRunner(session, model.meta, seed);

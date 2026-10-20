@@ -33,7 +33,7 @@ export interface Manifest {
   models: ManifestModel[];
 }
 
-export async function loadManifest(url = '/manifest.json'): Promise<Manifest> {
+export async function loadManifest(url = '/models/manifest.json'): Promise<Manifest> {
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`manifest request failed: ${res.status} ${res.statusText}`);
