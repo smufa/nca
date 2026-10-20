@@ -46,6 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--size", type=int, default=64, help="square grid size")
     p.add_argument("--steps", type=int, default=300)
     p.add_argument("--fire-rate", type=float, default=0.5)
+    p.add_argument(
+        "--no-wrap",
+        action="store_true",
+        help="checkpoint was trained with zero (non-periodic) boundaries",
+    )
     p.add_argument("--frame-every", type=int, default=2)
     p.add_argument("--scale", type=int, default=3)
     p.add_argument("--damage-at", type=int, default=None, help="step to apply damage")
@@ -64,7 +69,12 @@ def main(argv: list[str] | None = None) -> None:
 
     state = torch.load(args.checkpoint, map_location="cpu")
     channel_n, hidden_n = _infer_dims(state)
-    ca = NeuralCA(channel_n=channel_n, hidden_n=hidden_n, fire_rate=args.fire_rate)
+    ca = NeuralCA(
+        channel_n=channel_n,
+        hidden_n=hidden_n,
+        fire_rate=args.fire_rate,
+        wrap=not args.no_wrap,
+    )
     ca.load_state_dict(state)
     ca.to(device).eval()
     print(f"loaded {args.checkpoint} ({channel_n} channels, {ca.num_parameters} params)")

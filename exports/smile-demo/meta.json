@@ -1,12 +1,13 @@
 {
   "id": "smile-demo",
-  "created": "2026-10-19T16:12:54",
+  "created": "2026-10-20T11:25:05",
   "channel_n": 16,
   "hidden_n": 128,
   "fire_rate": 0.5,
   "num_parameters": 8336,
   "grid": 32,
   "dynamic_shape": true,
+  "wrap": false,
   "opset": 18,
   "experiment": "regenerating",
   "target": "emoji:\ud83d\ude00",
@@ -18,6 +19,6 @@
     "32": 1.341104507446289e-07,
     "40": 1.1920928955078125e-07
   },
-  "size_bytes": 47990,
-  "git_rev": null
+  "size_bytes": 48032,
+  "git_rev": "343be98"
 }

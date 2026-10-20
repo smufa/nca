@@ -6,6 +6,7 @@ per-variable gradient normalisation that stabilises training.
 
 from __future__ import annotations
 
+import json
 import random
 import time
 from dataclasses import dataclass, field
@@ -91,6 +92,32 @@ def _train_step(
     return x.detach(), float(loss.item())
 
 
+def _save_resume_state(
+    path: Path,
+    ca: NeuralCA,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    generator: torch.Generator,
+    device: torch.device,
+    step: int,
+    losses: list[float],
+    pool: SamplePool | None,
+) -> None:
+    state = {
+        "model": ca.state_dict(),
+        "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict(),
+        "step": step,
+        "losses": losses,
+        "rng": {"cpu": torch.get_rng_state(), "gen": generator.get_state()},
+    }
+    if device.type == "cuda":
+        state["rng"]["cuda"] = torch.cuda.get_rng_state_all()
+    if pool is not None:
+        state["pool"] = pool.x
+    torch.save(state, path)
+
+
 def train(
     ca: NeuralCA,
     target: torch.Tensor,
@@ -98,6 +125,7 @@ def train(
     cfg: TrainConfig,
     device: torch.device,
     out_dir: Path,
+    resume: str | Path | None = None,
 ) -> list[float]:
     """Train ``ca`` in place and return the loss history."""
     out_dir = Path(out_dir)
@@ -107,6 +135,10 @@ def train(
     np.random.seed(cfg.seed)
     torch.manual_seed(cfg.seed)
     generator = torch.Generator(device="cpu").manual_seed(cfg.seed)
+
+    if device.type == "cuda":
+        torch.backends.cudnn.benchmark = True
+        torch.set_float32_matmul_precision("high")
 
     ca.to(device)
     target = target.to(device)
@@ -128,6 +160,25 @@ def train(
         print(f"note: clamping damage_n {cfg.damage_n} -> {damage_n} (batch_size={cfg.batch_size})")
 
     losses: list[float] = []
+    start_step = 0
+    if resume is not None:
+        state = torch.load(resume, map_location="cpu")
+        ca.load_state_dict(state["model"])
+        optimizer.load_state_dict(state["optimizer"])
+        scheduler.load_state_dict(state["scheduler"])
+        start_step = int(state.get("step", 0))
+        losses = list(state.get("losses", []))
+        rng = state.get("rng", {})
+        if "cpu" in rng:
+            torch.set_rng_state(rng["cpu"])
+        if "gen" in rng:
+            generator.set_state(rng["gen"])
+        if device.type == "cuda" and "cuda" in rng:
+            torch.cuda.set_rng_state_all(rng["cuda"])
+        if pool is not None and "pool" in state:
+            pool.x = state["pool"].to(device)
+        print(f"resumed from {resume} at step {start_step}")
+
     start = time.time()
 
     print(
@@ -135,7 +186,7 @@ def train(
         f"pool={cfg.use_pool} damage={cfg.damage_n} | {cfg.iterations} iters"
     )
 
-    for step in range(cfg.iterations):
+    for step in range(start_step, cfg.iterations):
         if pool is not None:
             idx, x0 = pool.sample(cfg.batch_size, generator)
             with torch.no_grad():
@@ -161,12 +212,14 @@ def train(
 
         if step % cfg.log_every == 0 or step == cfg.iterations - 1:
             elapsed = time.time() - start
-            rate = (step + 1) / elapsed
+            done = step + 1 - start_step
+            rate = done / elapsed if elapsed > 0 else 0.0
             eta = (cfg.iterations - step - 1) / rate if rate > 0 else float("inf")
             print(
                 f"step {step + 1:6d}/{cfg.iterations} | loss {loss:.6f} "
                 f"| log10 {np.log10(max(loss, 1e-12)):+.3f} "
-                f"| {rate:.2f} it/s | eta {eta / 60:.1f} min"
+                f"| {rate:.2f} it/s | eta {eta / 60:.1f} min",
+                flush=True,
             )
             before = render(x0)
             after = render(x)
@@ -175,12 +228,22 @@ def train(
 
         if cfg.ckpt_every and (step + 1) % cfg.ckpt_every == 0:
             torch.save(ca.state_dict(), out_dir / f"ckpt_{step + 1:06d}.pt")
+            _save_resume_state(
+                out_dir / "state.pt", ca, optimizer, scheduler, generator,
+                device, step + 1, losses, pool,
+            )
+            (out_dir / "loss.json").write_text(json.dumps(losses))
 
     torch.save(ca.state_dict(), out_dir / "ckpt_final.pt")
+    _save_resume_state(
+        out_dir / "state.pt", ca, optimizer, scheduler, generator,
+        device, cfg.iterations, losses, pool,
+    )
+    (out_dir / "loss.json").write_text(json.dumps(losses))
     plot_loss(losses, out_dir / "loss.png")
 
     if cfg.make_gif:
-        print("Rendering growth animation...")
+        print("Rendering growth animation...", flush=True)
         frames = growth_frames(
             ca,
             seed,

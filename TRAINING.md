@@ -22,7 +22,7 @@ Volta, so the cu13 torch wheels we get from PyPI **will not run there**.
 > Always add `--constraint=h100` (equivalently `-C h100`) to GPU jobs.
 
 H100 is sm_90 and matches driver 580 / cu13, so the default PyPI torch build is
-exactly right for it.
+exactly right for it. `slurm/train.sbatch` already pins it.
 
 ## Environment
 
@@ -45,69 +45,49 @@ uv sync --no-sources --python 3.13 --group dev
 Fallback if we want zero lock divergence: `uv venv --python 3.13` +
 `uv pip install --torch-backend cu130 -r requirements.txt`.
 
-## Code changes needed before the first real run
+## Code changes (done)
 
-1. **Device / perf knobs** (`nca/cli.py`, `nca/train.py`)
-   - `--device cuda` already resolves; add `--amp {off,bf16,fp16}` (default
-     `off` — the model is tiny and launch-bound, not FLOP-bound).
-   - `torch.backends.cudnn.benchmark = True`, `torch.set_float32_matmul_precision('high')`.
-   - Optional `--compile` to wrap the step in `torch.compile` (the 64–96-step
-     Python loop is the bottleneck, not the GPU).
-2. **Resume** — save/load optimizer + step (`--resume ckpt.pt`); long jobs and
-   any preemption.
-3. **Logging** — write `loss.json` (currently only an in-memory list + PNG), and
-   flush stdout so `squeue`/`tail` monitoring works.
-4. **Offline targets** — compute nodes have no internet. Pre-download emoji PNGs
-   on the login node (or commit `assets/targets/`) and support `image:` specs.
-5. **Run naming** — deterministic `--run-name` so sweeps produce predictable dirs.
+- **Periodic boundaries**: the CA now wraps (circular padding in perception and in
+  the living mask), so cells no longer "bounce off" the edges. Controlled by
+  `NeuralCA(wrap=True)`; `--no-wrap` reproduces the original zero-padded
+  behaviour. ONNX export carries the same `Concat`/`Slice` wrapping (parity 0.0).
+- **Resume**: `--resume runs/<name>/state.pt` restores model + optimizer +
+  scheduler + RNG + sample pool.
+- **Logging**: `loss.json` plus flushed stdout; `state.pt` and `ckpt_*.pt` are
+  written every `--ckpt-every` steps. **All** intermediate checkpoints are kept
+  (they are tiny).
+- **Perf**: `cudnn.benchmark` + TF32 enabled automatically on CUDA.
+- **Run naming**: `--run-name` gives a deterministic `runs/<name>/`.
+- Targets are pre-cached in `assets/targets/` (committed), so compute nodes need
+  no internet.
+- Still optional/untested: `torch.compile`, AMP. The bottleneck is the Python
+  unroll, so try `--compile` if iteration time is high.
 
 ## SLURM scripts
 
-`slurm/train.sbatch`:
+- `slurm/train.sbatch` — one H100 job, sources `.venv`, forwards its args to
+  `main.py --device cuda`. Pins `--constraint=h100`.
+- `slurm/submit_sweep.sh` — submits experiments 1–3 for each target.
+
+New emoji set (distinct from the paper's):
+
+| name | emoji | name | emoji |
+| --- | --- | --- | --- |
+| crab | 🦀 | mushroom | 🍄 |
+| octopus | 🐙 | cactus | 🌵 |
+| trex | 🦖 | turtle | 🐢 |
 
 ```bash
-#!/bin/bash
-#SBATCH --job-name=nca
-#SBATCH --partition=gpu
-#SBATCH --constraint=h100
-#SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
-#SBATCH --time=12:00:00
-#SBATCH --output=logs/%x_%j.out
-#SBATCH --error=logs/%x_%j.err
-
-set -euo pipefail
-cd "$SLURM_SUBMIT_DIR"
-source .venv/bin/activate
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-python main.py "$@"
+bash slurm/submit_sweep.sh              # all 6 targets x 3 experiments = 18 jobs
+bash slurm/submit_sweep.sh crab         # just one target
 ```
 
-`slurm/submit_sweep.sh` submits one job per (target, experiment):
-
-```bash
-#!/bin/bash
-set -euo pipefail
-mkdir -p logs
-for target in "emoji:🦎" "emoji:😀" "emoji:🦋" "emoji:🐠"; do
-  for exp in growing persistent regenerating; do
-    id="${target#emoji:}_${exp}"
-    sbatch slurm/train.sbatch \
-      --target "$target" --experiment "$exp" \
-      --target-size 40 --padding 16 \
-      --batch-size 16 --iterations 8000 --train-steps 64 96 \
-      --run-name "$id" --device cuda
-  done
-done
-```
-
-## Suggested H100 config (paper settings, scaled)
+## Suggested H100 config (paper settings)
 
 | knob | value | why |
 | --- | --- | --- |
 | target-size / padding | 40 / 16 (72×72 grid) | paper setting |
-| batch-size | 16–32 | H100 is underutilised at batch 8 |
+| batch-size | 16 | H100 is underutilised at batch 8 |
 | iterations | 8000 | paper |
 | train-steps | 64–96 | paper |
 | pool-size / damage | 1024 / 0 or 3 | persistent / regenerating |
@@ -115,39 +95,39 @@ done
 | checkpoint-every | 250 | cheap, safe |
 
 Expect roughly tens of minutes per model (the CA is tiny; the Python unroll
-dominates), so a full sweep of 12 models is an afternoon.
+dominates), so a full sweep of 18 models is an afternoon.
 
-## Transfer
+## Transfer (git)
 
-Repo is not committed/pushed yet. Either:
+Remote: `https://github.com/smufa/nca.git` (branch `master`).
 
-- **rsync**: `rsync -az --exclude .venv --exclude runs --exclude node_modules \
-  ~/Projects/nca/ arnes:~/nca/`
-- or commit and `git clone` on the cluster.
+```bash
+# laptop
+git push -u origin master
 
-Export ONNX on the **login node** after training (CPU, uses the `dev` group),
-then rsync `exports/` back and commit it for the frontend.
+# cluster
+git clone https://github.com/smufa/nca.git ~/nca
+cd ~/nca && uv sync --no-sources --python 3.13 --group dev
+```
 
 ## Workflow
 
-1. rsync repo → cluster.
-2. `uv sync --no-sources --python 3.13 --group dev` on the login node.
-3. **Smoke test**: one short job (100 iters, small grid) with `srun` to confirm
-   H100 + cu13 torch import and a training step.
-4. Launch the sweep with `submit_sweep.sh`.
-5. Monitor: `squeue -u $USER`, `tail -f logs/*.out`, `sacct -j <id>`.
-6. Export the best checkpoints to ONNX on the login node.
-7. rsync `exports/` back, commit, open the frontend.
+1. Push the repo, clone on the cluster, `uv sync`.
+2. **Smoke test**: `srun -p gpu --constraint=h100 --gres=gpu:1 --time=00:10:00 \
+   --pty bash` then a 100-iteration run to confirm H100 + cu13 torch.
+3. `bash slurm/submit_sweep.sh`.
+4. Monitor: `squeue -u $USER`, `tail -f logs/*.out`, `sacct -j <id>`.
+5. Export ONNX on the login node (`uv run python -m nca.export ...`).
+6. rsync `exports/` back, commit, open the frontend.
 
 ## Milestones
 
 1. **T1** — env on cluster + H100 smoke test (imports, 100 iters).
-2. **T2** — one high-quality run (lizard, regenerating) + ONNX export.
-3. **T3** — sweep experiments 1–3 across targets.
+2. **T2** — one high-quality run (crab, regenerating) + ONNX export.
+3. **T3** — sweep experiments 1–3 across the 6 targets.
 4. **T4** — compare/curate models, ship to the frontend.
 
 ## Open questions
 
-- Transfer via rsync or push to a git remote?
-- Keep all checkpoints, or only the final + best-by-loss?
-- Any preference for a specific emoji/target set for the first sweep?
+- Keep all checkpoints (current behaviour) or prune old ones after each run?
+- Export every checkpoint, or only `ckpt_final` + best-by-loss?

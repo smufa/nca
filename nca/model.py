@@ -17,14 +17,33 @@ ALPHA_CHANNEL = 3
 ALIVE_THRESHOLD = 0.1
 
 
-def get_living_mask(x: torch.Tensor) -> torch.Tensor:
+def _circular_pad2d(x: torch.Tensor, pad: int) -> torch.Tensor:
+    """Wrap-pad the last two dimensions (periodic / toroidal boundaries).
+
+    Implemented with slicing + ``cat`` (rather than ``F.pad(..., mode='circular')``)
+    so the exact same graph exports cleanly to ONNX on opset 18.
+    """
+    if pad == 0:
+        return x
+    # width (last dim): left/right wraps
+    x = torch.cat([x[..., -pad:], x, x[..., :pad]], dim=-1)
+    # height (second-to-last dim): top/bottom wraps
+    x = torch.cat([x[..., -pad:, :], x, x[..., :pad, :]], dim=-2)
+    return x
+
+
+def get_living_mask(x: torch.Tensor, wrap: bool = True) -> torch.Tensor:
     """Return a ``[B, 1, H, W]`` boolean mask of cells that are alive.
 
     A cell is alive when any cell in its 3x3 neighbourhood has an alpha
-    value above ``ALIVE_THRESHOLD``.
+    value above ``ALIVE_THRESHOLD``. With ``wrap`` the neighbourhood is
+    periodic.
     """
     alpha = x[:, ALPHA_CHANNEL : ALPHA_CHANNEL + 1]
-    pooled = F.max_pool2d(alpha, kernel_size=3, stride=1, padding=1)
+    if wrap:
+        pooled = F.max_pool2d(_circular_pad2d(alpha, 1), kernel_size=3, stride=1, padding=0)
+    else:
+        pooled = F.max_pool2d(alpha, kernel_size=3, stride=1, padding=1)
     return pooled > ALIVE_THRESHOLD
 
 
@@ -66,10 +85,12 @@ class NeuralCA(nn.Module):
         channel_n: int = 16,
         fire_rate: float = 0.5,
         hidden_n: int = 128,
+        wrap: bool = True,
     ) -> None:
         super().__init__()
         self.channel_n = channel_n
         self.fire_rate = fire_rate
+        self.wrap = wrap
 
         # Perception output has 3 * channel_n channels; the update rule is a
         # small MLP applied per-cell via 1x1 convolutions.
@@ -101,6 +122,10 @@ class NeuralCA(nn.Module):
             weight = _perception_kernels(self.channel_n, angle).to(
                 device=x.device, dtype=x.dtype
             )
+        if self.wrap:
+            return F.conv2d(
+                _circular_pad2d(x, 1), weight, stride=1, padding=0, groups=self.channel_n
+            )
         return F.conv2d(x, weight, stride=1, padding=1, groups=self.channel_n)
 
     def forward(
@@ -110,7 +135,7 @@ class NeuralCA(nn.Module):
         angle: float = 0.0,
         step_size: float = 1.0,
     ) -> torch.Tensor:
-        pre_life_mask = get_living_mask(x)
+        pre_life_mask = get_living_mask(x, self.wrap)
 
         y = self.perceive(x, angle)
         dx = self.update(y) * step_size
@@ -121,6 +146,6 @@ class NeuralCA(nn.Module):
         update_mask = torch.rand_like(x[:, :1]) <= fire_rate
         x = x + dx * update_mask
 
-        post_life_mask = get_living_mask(x)
+        post_life_mask = get_living_mask(x, self.wrap)
         life_mask = pre_life_mask & post_life_mask
         return x * life_mask

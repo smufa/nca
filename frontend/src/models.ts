@@ -9,6 +9,7 @@ export interface ModelMeta {
   num_parameters: number;
   grid: number;
   dynamic_shape: boolean;
+  wrap: boolean;
   opset: number;
   experiment: string;
   target: string;

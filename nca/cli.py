@@ -59,6 +59,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--channels", type=int, default=16, help="number of state channels")
     p.add_argument("--hidden", type=int, default=128, help="update-rule hidden width")
     p.add_argument("--fire-rate", type=float, default=0.5)
+    p.add_argument(
+        "--no-wrap",
+        action="store_true",
+        help="use zero (non-periodic) boundaries instead of circular wrapping",
+    )
 
     p.add_argument("--iterations", type=int, default=1200)
     p.add_argument(
@@ -84,6 +89,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--threads", type=int, default=None, help="torch CPU threads")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out-dir", default=None)
+    p.add_argument(
+        "--run-name",
+        default=None,
+        help="deterministic run directory (runs/<name>)",
+    )
+    p.add_argument(
+        "--resume",
+        default=None,
+        help="resume training from a state.pt written by a previous run",
+    )
     p.add_argument("--log-every", type=int, default=10)
     p.add_argument("--ckpt-every", type=int, default=100)
     p.add_argument("--no-gif", action="store_true")
@@ -110,7 +125,9 @@ def main(argv: list[str] | None = None) -> None:
     seed = make_seed(h, w, args.channels)
 
     # --- output directory ----------------------------------------------
-    if args.out_dir is None:
+    if args.run_name:
+        out_dir = Path("runs") / args.run_name
+    elif args.out_dir is None:
         safe = args.target.replace(":", "_").replace("/", "_")
         stamp = time.strftime("%Y%m%d-%H%M%S")
         out_dir = Path("runs") / f"{safe}_{args.experiment}_{stamp}"
@@ -144,10 +161,15 @@ def main(argv: list[str] | None = None) -> None:
         seed=args.seed,
     )
 
-    ca = NeuralCA(channel_n=args.channels, fire_rate=args.fire_rate, hidden_n=args.hidden)
+    ca = NeuralCA(
+        channel_n=args.channels,
+        fire_rate=args.fire_rate,
+        hidden_n=args.hidden,
+        wrap=not args.no_wrap,
+    )
 
     print(f"Target: {args.target}  ({args.target_size}px, padded to {h}x{w})")
-    train(ca, target, seed, cfg, device, out_dir)
+    train(ca, target, seed, cfg, device, out_dir, resume=args.resume)
 
 
 if __name__ == "__main__":

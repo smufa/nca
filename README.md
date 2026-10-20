@@ -73,7 +73,8 @@ Outputs land in `exports/` (`model.onnx`, `meta.json`, `target.png`) and a
 identical masks at two grid sizes and asserts they agree (typically ~1e-7).
 
 See [`PLAN.md`](PLAN.md) for the ONNX interface, the WebGPU frontend design and
-performance notes.
+performance notes, and [`TRAINING.md`](TRAINING.md) for training on the ARNES
+SLURM cluster (H100, mixed-precision env, sweeps).
 
 ## Web playground (WebGPU)
 
@@ -124,6 +125,10 @@ One update step (`nca/model.py`) has four phases:
 4. **Living-cell masking.** Cells are zeroed unless a cell with `alpha > 0.1`
    exists in their 3×3 neighbourhood. Empty cells therefore carry no state
    and cannot grow on their own.
+
+Perception and the living mask use **circular (periodic) padding**, so the grid
+is a torus: patterns wrap around the edges instead of the CA learning to
+"bounce off" walls. Pass `--no-wrap` for the paper's zero-padded behaviour.
 
 Total parameters: **8,336** (`48*128 + 128 + 128*16 + 16`), matching the
 reference implementation.

@@ -28,7 +28,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .model import NeuralCA, _perception_kernels, get_living_mask
+from .model import NeuralCA, _circular_pad2d, _perception_kernels, get_living_mask
 from .viz import render, save_image
 
 DEFAULT_OPSET = 18
@@ -48,13 +48,19 @@ class ExportStep(nn.Module):
         fire_mask: torch.Tensor,
         step_size: torch.Tensor,
     ) -> torch.Tensor:
-        pre = get_living_mask(x)
+        wrap = self.ca.wrap
+        pre = get_living_mask(x, wrap)
+        xp = _circular_pad2d(x, 1) if wrap else x
         y = F.conv2d(
-            x, perception_weight, stride=1, padding=1, groups=self.ca.channel_n
+            xp,
+            perception_weight,
+            stride=1,
+            padding=0 if wrap else 1,
+            groups=self.ca.channel_n,
         )
         dx = self.ca.update(y) * step_size
         x = x + dx * fire_mask
-        post = get_living_mask(x)
+        post = get_living_mask(x, wrap)
         return x * (pre & post).to(x.dtype)
 
 
@@ -63,10 +69,10 @@ def infer_dims(state_dict: dict) -> tuple[int, int]:
     return weight.shape[1] // 3, weight.shape[0]
 
 
-def _load_ca(checkpoint: str | Path) -> NeuralCA:
+def _load_ca(checkpoint: str | Path, wrap: bool = True) -> NeuralCA:
     state = torch.load(checkpoint, map_location="cpu")
     channel_n, hidden_n = infer_dims(state)
-    ca = NeuralCA(channel_n=channel_n, hidden_n=hidden_n)
+    ca = NeuralCA(channel_n=channel_n, hidden_n=hidden_n, wrap=wrap)
     ca.load_state_dict(state)
     ca.eval()
     return ca
@@ -224,6 +230,7 @@ def export_one(
     target: str,
     do_verify: bool,
     verify_steps: int,
+    wrap: bool = True,
 ) -> dict:
     import onnx
     import onnxruntime as ort
@@ -233,7 +240,7 @@ def export_one(
     model_dir = out_dir / model_id
     model_dir.mkdir(parents=True, exist_ok=True)
 
-    ca = _load_ca(checkpoint)
+    ca = _load_ca(checkpoint, wrap=wrap)
     target_arr = _find_target(checkpoint)
     if grid is None:
         grid = int(target_arr.shape[-1]) if target_arr is not None else 64
@@ -259,6 +266,7 @@ def export_one(
         "num_parameters": ca.num_parameters,
         "grid": grid,
         "dynamic_shape": dynamic,
+        "wrap": wrap,
         "opset": opset,
         "experiment": experiment,
         "target": target,
@@ -296,6 +304,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--opset", type=int, default=DEFAULT_OPSET)
     p.add_argument("--experiment", default="unknown")
     p.add_argument("--target", default="unknown")
+    p.add_argument(
+        "--no-wrap",
+        action="store_true",
+        help="use zero (non-periodic) boundaries instead of circular wrapping",
+    )
     p.add_argument("--no-verify", action="store_true")
     p.add_argument("--verify-steps", type=int, default=8)
     return p
@@ -317,6 +330,7 @@ def main(argv: list[str] | None = None) -> None:
         target=args.target,
         do_verify=not args.no_verify,
         verify_steps=args.verify_steps,
+        wrap=not args.no_wrap,
     )
 
 
