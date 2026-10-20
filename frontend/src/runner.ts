@@ -52,6 +52,7 @@ export class CaRunner {
   private weightTensor: ort.Tensor | null = null;
   private stepTensor: ort.Tensor | null = null;
   private cur = 0;
+  private adapterDesc = '';
 
   private constructor(
     session: ort.InferenceSession,
@@ -84,6 +85,11 @@ export class CaRunner {
     return this.useGpu ? 'gpu' : 'cpu';
   }
 
+  /** WebGPU adapter description, for diagnostics. */
+  get adapter(): string {
+    return this.adapterDesc || 'unknown';
+  }
+
   /** Allocate the GPU buffers and wrap them as ORT tensors. */
   private async setupGpu(): Promise<void> {
     try {
@@ -93,14 +99,20 @@ export class CaRunner {
       const adapter = ort.env.webgpu.adapter as
         | { info?: unknown; adapterInfo?: unknown }
         | undefined;
-      console.info(
-        '[nca] WebGPU adapter:',
-        adapter?.info ?? adapter?.adapterInfo ?? adapter,
-        '| maxComputeWorkgroupStorageSize:',
-        device.limits.maxComputeWorkgroupStorageSize,
-        '| maxStorageBufferBindingSize:',
-        device.limits.maxStorageBufferBindingSize,
-      );
+      const info = (adapter?.info ?? adapter?.adapterInfo) as
+        | {
+            vendor?: string;
+            architecture?: string;
+            device?: string;
+            description?: string;
+          }
+        | undefined;
+      this.adapterDesc = info
+        ? [info.vendor, info.architecture, info.device, info.description]
+            .filter(Boolean)
+            .join(' ') || 'unknown'
+        : 'unknown';
+      console.info('[nca] WebGPU adapter:', this.adapterDesc);
 
       const { channelN: C, grid: H } = this;
       const W = H;

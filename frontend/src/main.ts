@@ -389,6 +389,7 @@ function updateInfo(): void {
     ['experiment', m.experiment],
     ['fire rate', String(runner.fireRate)],
     ['io', runner.mode],
+    ['gpu', runner.adapter],
     ['views', String(views.length)],
     ['parity', parity],
   ]
@@ -583,7 +584,8 @@ if (!('gpu' in navigator)) {
   requestAnimationFrame(frame);
 }
 
-// Console helpers: `nca.bench(200)` measures raw session.run cost (no render).
+// Console helpers: `nca.bench(200)` measures raw session.run cost (no render),
+// `nca.benchSync(50)` measures the GPU->CPU download on its own.
 (window as unknown as Record<string, unknown>).nca = {
   bench: async (n = 100): Promise<number | undefined> => {
     if (!runner) {
@@ -593,7 +595,18 @@ if (!('gpu' in navigator)) {
     const t0 = performance.now();
     for (let i = 0; i < n; i++) await runner.step();
     const ms = (performance.now() - t0) / n;
-    console.info(`[nca] ${ms.toFixed(2)} ms/step · ${(1000 / ms).toFixed(0)} steps/s`);
+    console.info(`[nca] run: ${ms.toFixed(2)} ms/step · ${(1000 / ms).toFixed(0)} steps/s`);
+    return ms;
+  },
+  benchSync: async (n = 50): Promise<number | undefined> => {
+    if (!runner) {
+      console.warn('[nca] no model loaded');
+      return undefined;
+    }
+    const t0 = performance.now();
+    for (let i = 0; i < n; i++) await runner.sync();
+    const ms = (performance.now() - t0) / n;
+    console.info(`[nca] sync: ${ms.toFixed(2)} ms`);
     return ms;
   },
   state: () => runner,
