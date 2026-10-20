@@ -2,6 +2,146 @@
   "version": 1,
   "models": [
     {
+      "id": "cactus_growing",
+      "path": "cactus_growing/model.onnx",
+      "meta": {
+        "id": "cactus_growing",
+        "created": "2026-10-20T17:49:04",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "growing",
+        "target": "emoji:1f335",
+        "source_checkpoint": "/tmp/sweep_runs/cactus_growing/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 4.76837158203125e-07,
+          "80": 4.76837158203125e-07
+        },
+        "size_bytes": 59432,
+        "git_rev": "302dead"
+      }
+    },
+    {
+      "id": "cactus_persistent",
+      "path": "cactus_persistent/model.onnx",
+      "meta": {
+        "id": "cactus_persistent",
+        "created": "2026-10-20T17:49:12",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "persistent",
+        "target": "emoji:1f335",
+        "source_checkpoint": "/tmp/sweep_runs/cactus_persistent/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 7.62939453125e-06,
+          "80": 3.814697265625e-06
+        },
+        "size_bytes": 59432,
+        "git_rev": "302dead"
+      }
+    },
+    {
+      "id": "cactus_regenerating",
+      "path": "cactus_regenerating/model.onnx",
+      "meta": {
+        "id": "cactus_regenerating",
+        "created": "2026-10-20T17:49:20",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "regenerating",
+        "target": "emoji:1f335",
+        "source_checkpoint": "/tmp/sweep_runs/cactus_regenerating/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 9.5367431640625e-07,
+          "80": 1.9073486328125e-06
+        },
+        "size_bytes": 59432,
+        "git_rev": "302dead"
+      }
+    },
+    {
+      "id": "crab_growing",
+      "path": "crab_growing/model.onnx",
+      "meta": {
+        "id": "crab_growing",
+        "created": "2026-10-20T17:49:28",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "growing",
+        "target": "emoji:1f980",
+        "source_checkpoint": "/tmp/sweep_runs/crab_growing/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 9.5367431640625e-07,
+          "80": 9.5367431640625e-07
+        },
+        "size_bytes": 59432,
+        "git_rev": "302dead"
+      }
+    },
+    {
+      "id": "crab_persistent",
+      "path": "crab_persistent/model.onnx",
+      "meta": {
+        "id": "crab_persistent",
+        "created": "2026-10-20T17:49:36",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "persistent",
+        "target": "emoji:1f980",
+        "source_checkpoint": "/tmp/sweep_runs/crab_persistent/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 7.62939453125e-06,
+          "80": 3.814697265625e-06
+        },
+        "size_bytes": 59432,
+        "git_rev": "302dead"
+      }
+    },
+    {
       "id": "crab_regen_2000",
       "path": "crab_regen_2000/model.onnx",
       "meta": {
@@ -141,6 +281,118 @@
       }
     },
     {
+      "id": "crab_regenerating",
+      "path": "crab_regenerating/model.onnx",
+      "meta": {
+        "id": "crab_regenerating",
+        "created": "2026-10-20T17:49:43",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "regenerating",
+        "target": "emoji:1f980",
+        "source_checkpoint": "/tmp/sweep_runs/crab_regenerating/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 9.5367431640625e-07,
+          "80": 1.9073486328125e-06
+        },
+        "size_bytes": 59432,
+        "git_rev": "302dead"
+      }
+    },
+    {
+      "id": "octopus_growing",
+      "path": "octopus_growing/model.onnx",
+      "meta": {
+        "id": "octopus_growing",
+        "created": "2026-10-20T17:49:50",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "growing",
+        "target": "emoji:1f419",
+        "source_checkpoint": "/tmp/sweep_runs/octopus_growing/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 1.430511474609375e-06,
+          "80": 1.1920928955078125e-06
+        },
+        "size_bytes": 59432,
+        "git_rev": "302dead"
+      }
+    },
+    {
+      "id": "octopus_persistent",
+      "path": "octopus_persistent/model.onnx",
+      "meta": {
+        "id": "octopus_persistent",
+        "created": "2026-10-20T17:49:58",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "persistent",
+        "target": "emoji:1f419",
+        "source_checkpoint": "/tmp/sweep_runs/octopus_persistent/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 1.9073486328125e-06,
+          "80": 1.9073486328125e-06
+        },
+        "size_bytes": 59432,
+        "git_rev": "302dead"
+      }
+    },
+    {
+      "id": "octopus_regenerating",
+      "path": "octopus_regenerating/model.onnx",
+      "meta": {
+        "id": "octopus_regenerating",
+        "created": "2026-10-20T17:50:05",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "regenerating",
+        "target": "emoji:1f419",
+        "source_checkpoint": "/tmp/sweep_runs/octopus_regenerating/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 9.5367431640625e-07,
+          "80": 9.5367431640625e-07
+        },
+        "size_bytes": 59432,
+        "git_rev": "302dead"
+      }
+    },
+    {
       "id": "smile-demo",
       "path": "smile-demo/model.onnx",
       "meta": {
@@ -167,7 +419,147 @@
         "size_bytes": 48032,
         "git_rev": "343be98"
       }
+    },
+    {
+      "id": "trex_growing",
+      "path": "trex_growing/model.onnx",
+      "meta": {
+        "id": "trex_growing",
+        "created": "2026-10-20T17:50:13",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "growing",
+        "target": "emoji:1f996",
+        "source_checkpoint": "/tmp/sweep_runs/trex_growing/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 7.152557373046875e-07,
+          "80": 1.1920928955078125e-06
+        },
+        "size_bytes": 59432,
+        "git_rev": "302dead"
+      }
+    },
+    {
+      "id": "trex_persistent",
+      "path": "trex_persistent/model.onnx",
+      "meta": {
+        "id": "trex_persistent",
+        "created": "2026-10-20T17:50:20",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "persistent",
+        "target": "emoji:1f996",
+        "source_checkpoint": "/tmp/sweep_runs/trex_persistent/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 3.814697265625e-06,
+          "80": 3.0517578125e-05
+        },
+        "size_bytes": 59432,
+        "git_rev": "302dead"
+      }
+    },
+    {
+      "id": "trex_regenerating",
+      "path": "trex_regenerating/model.onnx",
+      "meta": {
+        "id": "trex_regenerating",
+        "created": "2026-10-20T17:50:27",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "regenerating",
+        "target": "emoji:1f996",
+        "source_checkpoint": "/tmp/sweep_runs/trex_regenerating/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 1.430511474609375e-06,
+          "80": 9.5367431640625e-07
+        },
+        "size_bytes": 59432,
+        "git_rev": "302dead"
+      }
+    },
+    {
+      "id": "turtle_growing",
+      "path": "turtle_growing/model.onnx",
+      "meta": {
+        "id": "turtle_growing",
+        "created": "2026-10-20T17:50:34",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "growing",
+        "target": "emoji:1f422",
+        "source_checkpoint": "/tmp/sweep_runs/turtle_growing/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 4.76837158203125e-07,
+          "80": 4.76837158203125e-07
+        },
+        "size_bytes": 59432,
+        "git_rev": "302dead"
+      }
+    },
+    {
+      "id": "turtle_persistent",
+      "path": "turtle_persistent/model.onnx",
+      "meta": {
+        "id": "turtle_persistent",
+        "created": "2026-10-20T17:50:42",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "persistent",
+        "target": "emoji:1f422",
+        "source_checkpoint": "/tmp/sweep_runs/turtle_persistent/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 9.5367431640625e-07,
+          "80": 3.814697265625e-06
+        },
+        "size_bytes": 59432,
+        "git_rev": "302dead"
+      }
     }
   ],
-  "generated": "2026-10-20T14:52:48"
+  "generated": "2026-10-20T17:50:42"
 }
