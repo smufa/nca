@@ -609,5 +609,15 @@ if (!('gpu' in navigator)) {
     console.info(`[nca] sync: ${ms.toFixed(2)} ms`);
     return ms;
   },
+  gpuInfo: async (): Promise<unknown> => {
+    const adapter = await navigator.gpu.requestAdapter();
+    const a = adapter as
+      | { info?: unknown; adapterInfo?: unknown; features?: GPUFeatureName[] }
+      | null;
+    const info = a?.info ?? a?.adapterInfo ?? null;
+    const features = a?.features ? [...a.features] : [];
+    console.info('[nca] adapter:', adapter, '\ninfo:', info, '\nfeatures:', features);
+    return { adapter, info, features };
+  },
   state: () => runner,
 };
