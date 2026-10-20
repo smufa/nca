@@ -2,6 +2,118 @@
   "version": 1,
   "models": [
     {
+      "id": "crab_regen_2000",
+      "path": "crab_regen_2000/model.onnx",
+      "meta": {
+        "id": "crab_regen_2000",
+        "created": "2026-10-20T14:04:19",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "regenerating",
+        "target": "emoji:1f980",
+        "source_checkpoint": "/tmp/crab_regen/ckpt_002000.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 9.5367431640625e-07,
+          "80": 1.430511474609375e-06
+        },
+        "size_bytes": 59432,
+        "git_rev": "b393a89"
+      }
+    },
+    {
+      "id": "crab_regen_4000",
+      "path": "crab_regen_4000/model.onnx",
+      "meta": {
+        "id": "crab_regen_4000",
+        "created": "2026-10-20T14:04:28",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "regenerating",
+        "target": "emoji:1f980",
+        "source_checkpoint": "/tmp/crab_regen/ckpt_004000.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 9.5367431640625e-07,
+          "80": 9.5367431640625e-07
+        },
+        "size_bytes": 59432,
+        "git_rev": "b393a89"
+      }
+    },
+    {
+      "id": "crab_regen_6000",
+      "path": "crab_regen_6000/model.onnx",
+      "meta": {
+        "id": "crab_regen_6000",
+        "created": "2026-10-20T14:04:37",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "regenerating",
+        "target": "emoji:1f980",
+        "source_checkpoint": "/tmp/crab_regen/ckpt_006000.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 9.5367431640625e-07,
+          "80": 9.5367431640625e-07
+        },
+        "size_bytes": 59432,
+        "git_rev": "b393a89"
+      }
+    },
+    {
+      "id": "crab_regen_8000",
+      "path": "crab_regen_8000/model.onnx",
+      "meta": {
+        "id": "crab_regen_8000",
+        "created": "2026-10-20T14:04:46",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "num_parameters": 8336,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 18,
+        "experiment": "regenerating",
+        "target": "emoji:1f980",
+        "source_checkpoint": "/tmp/crab_regen/ckpt_008000.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 1.9073486328125e-06,
+          "80": 9.5367431640625e-07
+        },
+        "size_bytes": 59432,
+        "git_rev": "b393a89"
+      }
+    },
+    {
       "id": "smile-demo",
       "path": "smile-demo/model.onnx",
       "meta": {
@@ -30,5 +142,5 @@
       }
     }
   ],
-  "generated": "2026-10-20T11:25:05"
+  "generated": "2026-10-20T14:04:46"
 }
