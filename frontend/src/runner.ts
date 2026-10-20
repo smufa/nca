@@ -90,6 +90,18 @@ export class CaRunner {
       const device = await ort.env.webgpu.device;
       if (!device) return;
 
+      const adapter = ort.env.webgpu.adapter as
+        | { info?: unknown; adapterInfo?: unknown }
+        | undefined;
+      console.info(
+        '[nca] WebGPU adapter:',
+        adapter?.info ?? adapter?.adapterInfo ?? adapter,
+        '| maxComputeWorkgroupStorageSize:',
+        device.limits.maxComputeWorkgroupStorageSize,
+        '| maxStorageBufferBindingSize:',
+        device.limits.maxStorageBufferBindingSize,
+      );
+
       const { channelN: C, grid: H } = this;
       const W = H;
       this.stateBytes = C * H * W * 4;
