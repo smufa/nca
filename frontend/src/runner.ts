@@ -24,6 +24,8 @@ export class CaRunner {
   private mask: Float32Array;
   private rng: Rng;
   private seed: number;
+  private stepping = false;
+  private queuedEdits: Array<(x: Float32Array) => void> = [];
 
   private constructor(
     session: ort.InferenceSession,
@@ -54,7 +56,27 @@ export class CaRunner {
     if (seed !== undefined) this.seed = seed;
     this.rng = mulberry32(this.seed);
     this.x = seedState(this.channelN, this.grid);
+    this.queuedEdits = [];
     this.stepCount = 0;
+  }
+
+  /**
+   * Apply an edit to the state.
+   *
+   * While a step is in flight `x` still points at that step's *input* buffer,
+   * and the step will replace it with its output. So we queue the edit and apply
+   * it to the fresh state once the step finishes; otherwise it would be lost.
+   */
+  edit(fn: (x: Float32Array) => void): void {
+    if (this.stepping) this.queuedEdits.push(fn);
+    else fn(this.x);
+  }
+
+  private flushEdits(): void {
+    if (this.queuedEdits.length === 0) return;
+    const queued = this.queuedEdits;
+    this.queuedEdits = [];
+    for (const fn of queued) fn(this.x);
   }
 
   /** Advance the CA by one step. */
@@ -74,8 +96,14 @@ export class CaRunner {
       step_size: new ort.Tensor('float32', new Float32Array([1]), []),
     };
 
-    const out = await this.session.run(feeds);
-    this.x = (out['x_next'] as ort.Tensor).data as Float32Array;
+    this.stepping = true;
+    try {
+      const out = await this.session.run(feeds);
+      this.x = (out['x_next'] as ort.Tensor).data as Float32Array;
+    } finally {
+      this.stepping = false;
+    }
+    this.flushEdits();
     this.stepCount++;
   }
 

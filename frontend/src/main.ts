@@ -114,6 +114,7 @@ function paintDot(view: View, cx: number, cy: number, painted: Set<number>): voi
   const x0 = Math.max(0, cx - brushRadius);
   const x1 = Math.min(grid - 1, cx + brushRadius);
 
+  const indices: number[] = [];
   for (let y = y0; y <= y1; y++) {
     for (let x = x0; x <= x1; x++) {
       const dx = x - cx;
@@ -122,14 +123,20 @@ function paintDot(view: View, cx: number, cy: number, painted: Set<number>): voi
       const i = y * grid + x;
       if (painted.has(i)) continue; // at most once per cell per stroke
       painted.add(i);
-      for (const c of targets) {
-        const idx = c * plane + i;
-        if (tool === 'one') runner.x[idx] = 1;
-        else if (tool === 'zero') runner.x[idx] = 0;
-        else runner.x[idx] *= brushFactor;
-      }
+      for (const c of targets) indices.push(c * plane + i);
     }
   }
+  if (indices.length === 0) return;
+
+  const op = tool;
+  const factor = brushFactor;
+  runner.edit((x) => {
+    for (const idx of indices) {
+      if (op === 'one') x[idx] = 1;
+      else if (op === 'zero') x[idx] = 0;
+      else x[idx] *= factor;
+    }
+  });
 }
 
 /** Interpolate a stroke between two cells so fast drags leave no gaps. */
