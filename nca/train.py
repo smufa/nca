@@ -41,6 +41,7 @@ class TrainConfig:
     gif_scale: int = 3
     make_gif: bool = True
     seed: int = 0
+    compile: bool = False
 
 
 def per_sample_loss(x: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -68,6 +69,7 @@ def make_circle_masks(
 
 def _train_step(
     ca: NeuralCA,
+    forward,
     optimizer: torch.optim.Optimizer,
     x0: torch.Tensor,
     target: torch.Tensor,
@@ -79,7 +81,7 @@ def _train_step(
     )
     x = x0
     for _ in range(n):
-        x = ca(x)
+        x = forward(x)
     loss = loss_fn(x, target)
 
     optimizer.zero_grad(set_to_none=True)
@@ -141,6 +143,8 @@ def train(
         torch.set_float32_matmul_precision("high")
 
     ca.to(device)
+    # Compile the step to cut per-kernel launch overhead in the ~80-step unroll.
+    forward = torch.compile(ca) if cfg.compile else ca
     target = target.to(device)
     seed = seed.to(device)
     _, h, w = seed.shape
@@ -202,7 +206,7 @@ def train(
         else:
             x0 = seed.unsqueeze(0).repeat(cfg.batch_size, 1, 1, 1).contiguous()
 
-        x, loss = _train_step(ca, optimizer, x0, target, cfg, generator)
+        x, loss = _train_step(ca, forward, optimizer, x0, target, cfg, generator)
         scheduler.step()
 
         if pool is not None:

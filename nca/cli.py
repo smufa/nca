@@ -84,6 +84,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--lr-gamma", type=float, default=0.1)
     p.add_argument("--no-grad-norm", action="store_true")
+    p.add_argument(
+        "--compile",
+        action="store_true",
+        help="torch.compile the CA step (faster unroll on GPU)",
+    )
 
     p.add_argument("--device", default="auto")
     p.add_argument("--threads", type=int, default=None, help="torch CPU threads")
@@ -159,6 +164,7 @@ def main(argv: list[str] | None = None) -> None:
         make_gif=not args.no_gif,
         gif_steps=args.gif_steps,
         seed=args.seed,
+        compile=args.compile,
     )
 
     ca = NeuralCA(
