@@ -134,6 +134,16 @@ Findings so far (Intel UHD 620):
   3. **Split hidden units across workgroups** and reduce `dx` with atomics to cut
      per-thread weight reads.
 
+## Training performance (measured on a MIG slice, 72×72 / batch 16)
+
+- The ~80-step unroll dominates; the full-size model trains at **~2.3 it/s**.
+- **`--amp bf16` → ~2.9 it/s (1.3×)** with comparable loss (the reported loss is
+  recomputed in fp32). Use it.
+- **`torch.compile` does not help**: compiling the module is neutral, compiling
+  the whole unroll sequence is *slower* (large warmup, specialised per step count).
+- The unroll is compute/backward-bound on that small slice, not Python-bound, so
+  further speed-ups would come from a larger batch (better utilisation) or bf16.
+
 ## Gotchas
 
 - **NixOS + Vulkan (for `scripts/shader_bench.py`)**: the loader/ICDs aren't on
