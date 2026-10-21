@@ -8,7 +8,9 @@
  *   1. perception (depthwise 3x3, wrap) + update-rule MLP + fire/step -> `tmp`
  *   2. living-cell mask (pre & post) -> the other state buffer
  *
- * The MLP weights come from `weights.bin` (exported alongside the ONNX model).
+ * The shaders live in `wgsl/*.wgsl` so the same source is used by the headless
+ * test harness in `scripts/shader_bench.py`. The MLP weights come from
+ * `weights.bin` (exported alongside the ONNX model).
  */
 
 import type { ManifestModel } from './models';
@@ -17,183 +19,13 @@ import type { Rng } from './nca';
 import type { BrushOp, CaEngine, Perf } from './engine';
 import type { ChannelMapping } from './nca';
 
+import PASS1 from './wgsl/pass1.wgsl?raw';
+import PASS2 from './wgsl/pass2.wgsl?raw';
+import DRAW_WGSL from './wgsl/draw.wgsl?raw';
+import BRUSH_WGSL from './wgsl/brush.wgsl?raw';
+
 const WG = 8;
-
-const PARAMS_STRUCT = /* wgsl */ `
-struct Params {
-  C: u32, H: u32, W: u32, hidden: u32,
-  w1: u32, b1: u32, w2: u32, b2: u32,
-  step: f32,
-};
-fn sidx(c: u32, y: u32, x: u32) -> u32 { return (c * p.H + y) * p.W + x; }
-`;
-
-const PASS2 = /* wgsl */ `
-${PARAMS_STRUCT}
-@group(0) @binding(0) var<storage, read> old: array<f32>;
-@group(0) @binding(1) var<storage, read> tmp: array<f32>;
-@group(0) @binding(2) var<storage, read_write> next: array<f32>;
-@group(0) @binding(3) var<uniform> p: Params;
-
-@compute @workgroup_size(${WG}, ${WG}, 1)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let x = gid.x;
-  let y = gid.y;
-  if (x >= p.W || y >= p.H) { return; }
-  var pre = 0.0;
-  var post = 0.0;
-  for (var dy: u32 = 0u; dy < 3u; dy = dy + 1u) {
-    for (var dx: u32 = 0u; dx < 3u; dx = dx + 1u) {
-      let yy = (y + dy + p.H - 1u) % p.H;
-      let xx = (x + dx + p.W - 1u) % p.W;
-      pre = max(pre, old[sidx(3u, yy, xx)]);
-      post = max(post, tmp[sidx(3u, yy, xx)]);
-    }
-  }
-  var alive = 0.0;
-  if (pre > 0.1 && post > 0.1) { alive = 1.0; }
-  for (var c: u32 = 0u; c < 16u; c = c + 1u) {
-    next[sidx(c, y, x)] = tmp[sidx(c, y, x)] * alive;
-  }
-}
-`;
-
 const STORAGE = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
-
-const WGX = WG;
-const WGY = WG;
-const WGS = WGX * WGY;
-// Per-thread perception stride, padded from 48 so consecutive threads land on
-// different shared-memory banks (48 % 32 == 16 would be a 16-way conflict).
-const PSTRIDE = 49;
-
-const PASS1 = /* wgsl */ `
-${PARAMS_STRUCT}
-const PSTRIDE: u32 = ${PSTRIDE}u;
-var<workgroup> perc_sh: array<f32, ${WGS * PSTRIDE}>;
-
-@group(0) @binding(0) var<storage, read> state: array<f32>;
-@group(0) @binding(1) var<storage, read> fire: array<f32>;
-@group(0) @binding(2) var<storage, read> weights: array<f32>;
-@group(0) @binding(3) var<storage, read> kernel: array<f32>;
-@group(0) @binding(4) var<storage, read_write> out: array<f32>;
-@group(0) @binding(5) var<uniform> p: Params;
-
-@compute @workgroup_size(${WGX}, ${WGY}, 1)
-fn main(
-  @builtin(global_invocation_id) gid: vec3<u32>,
-  @builtin(local_invocation_index) lid: u32,
-) {
-  let x = gid.x;
-  let y = gid.y;
-  if (x >= p.W || y >= p.H) { return; }
-  let base = lid * PSTRIDE;
-
-  // perception into shared memory (each thread owns its 48-float region, so no
-  // barrier is needed). Dynamic indexing of shared memory is cheap, unlike a
-  // dynamically-indexed private array which spills to local memory.
-  for (var c: u32 = 0u; c < 16u; c = c + 1u) {
-    var ki = 0.0;
-    var kx = 0.0;
-    var ky = 0.0;
-    for (var dy: u32 = 0u; dy < 3u; dy = dy + 1u) {
-      for (var dx: u32 = 0u; dx < 3u; dx = dx + 1u) {
-        let yy = (y + dy + p.H - 1u) % p.H;
-        let xx = (x + dx + p.W - 1u) % p.W;
-        let s = state[sidx(c, yy, xx)];
-        let k = dy * 3u + dx;
-        ki = ki + s * kernel[k];
-        kx = kx + s * kernel[9u + k];
-        ky = ky + s * kernel[18u + k];
-      }
-    }
-    perc_sh[base + c * 3u] = ki;
-    perc_sh[base + c * 3u + 1u] = kx;
-    perc_sh[base + c * 3u + 2u] = ky;
-  }
-
-  // update rule: dx = W2 * relu(W1 * perc + b1) + b2, fused
-  var dxv: array<f32, 16>;
-  for (var c: u32 = 0u; c < 16u; c = c + 1u) { dxv[c] = weights[p.b2 + c]; }
-  for (var j: u32 = 0u; j < p.hidden; j = j + 1u) {
-    var h = weights[p.b1 + j];
-    for (var i: u32 = 0u; i < 48u; i = i + 1u) {
-      h = h + weights[p.w1 + j * 48u + i] * perc_sh[base + i];
-    }
-    h = max(h, 0.0);
-    for (var c: u32 = 0u; c < 16u; c = c + 1u) {
-      dxv[c] = dxv[c] + weights[p.w2 + c * p.hidden + j] * h;
-    }
-  }
-
-  let f = fire[y * p.W + x];
-  for (var c: u32 = 0u; c < 16u; c = c + 1u) {
-    out[sidx(c, y, x)] = state[sidx(c, y, x)] + dxv[c] * f * p.step;
-  }
-}
-`;
-
-const DRAW_WGSL = /* wgsl */ `
-struct DrawParams {
-  H: u32, W: u32,
-  r: i32, g: i32, b: i32, a: i32,
-  bg: f32, pad: f32,
-};
-@group(0) @binding(0) var<storage, read> state: array<f32>;
-@group(0) @binding(1) var<uniform> dp: DrawParams;
-
-@vertex
-fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
-  var p = array<vec2<f32>, 3>(
-    vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
-  return vec4<f32>(p[vi], 0.0, 1.0);
-}
-
-@fragment
-fn fs(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {
-  let x = u32(fc.x);
-  let y = u32(fc.y);
-  if (x >= dp.W || y >= dp.H) { discard; }
-  let plane = dp.H * dp.W;
-  let i = y * dp.W + x;
-  var alpha = 1.0;
-  if (dp.a >= 0) { alpha = clamp(state[u32(dp.a) * plane + i], 0.0, 1.0); }
-  let inv = (1.0 - alpha) * dp.bg;
-  return vec4<f32>(
-    clamp(state[u32(dp.r) * plane + i] + inv, 0.0, 1.0),
-    clamp(state[u32(dp.g) * plane + i] + inv, 0.0, 1.0),
-    clamp(state[u32(dp.b) * plane + i] + inv, 0.0, 1.0),
-    1.0);
-}
-`;
-
-const BRUSH_WGSL = /* wgsl */ `
-struct Brush {
-  H: u32, W: u32,
-  cx: i32, cy: i32, radius: i32, op: u32,
-  factor: f32, mask: u32,
-  pad0: u32, pad1: u32,
-};
-@group(0) @binding(0) var<storage, read_write> state: array<f32>;
-@group(0) @binding(1) var<uniform> b: Brush;
-
-@compute @workgroup_size(${WG}, ${WG}, 1)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  if (gid.x >= b.W || gid.y >= b.H) { return; }
-  let dx = i32(gid.x) - b.cx;
-  let dy = i32(gid.y) - b.cy;
-  if (dx * dx + dy * dy > b.radius * b.radius) { return; }
-  let i = gid.y * b.W + gid.x;
-  let plane = b.H * b.W;
-  for (var c: u32 = 0u; c < 16u; c = c + 1u) {
-    if ((b.mask & (1u << c)) == 0u) { continue; }
-    let idx = c * plane + i;
-    if (b.op == 0u) { state[idx] = 1.0; }
-    else if (b.op == 1u) { state[idx] = 0.0; }
-    else { state[idx] = state[idx] * b.factor; }
-  }
-}
-`;
 
 interface GpuViewRes {
   context: GPUCanvasContext;
@@ -221,6 +53,7 @@ export class ShaderRunner implements CaEngine {
   private tmpBuf!: GPUBuffer;
   private fireBuf!: GPUBuffer;
   private weightBuf!: GPUBuffer;
+  private weight4Buf!: GPUBuffer;
   private kernelBuf!: GPUBuffer;
   private paramsBuf!: GPUBuffer;
   private staging!: GPUBuffer;
@@ -306,17 +139,6 @@ export class ShaderRunner implements CaEngine {
       layout: 'auto',
       compute: { module: d.createShaderModule({ code: PASS2 }), entryPoint: 'main' },
     });
-    this.weightBuf = d.createBuffer({ size: this.weightData.byteLength, usage: STORAGE });
-    d.queue.writeBuffer(this.weightBuf, 0, this.weightData);
-    this.kernelBuf = d.createBuffer({
-      size: 27 * 4,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    this.paramsBuf = d.createBuffer({
-      size: 48,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
-
     this.brushPipeline = d.createComputePipeline({
       layout: 'auto',
       compute: { module: d.createShaderModule({ code: BRUSH_WGSL }), entryPoint: 'main' },
@@ -332,6 +154,20 @@ export class ShaderRunner implements CaEngine {
       vertex: { module: drawModule, entryPoint: 'vs' },
       fragment: { module: drawModule, entryPoint: 'fs', targets: [{ format }] },
       primitive: { topology: 'triangle-list' },
+    });
+
+    this.weightBuf = d.createBuffer({ size: this.weightData.byteLength, usage: STORAGE });
+    d.queue.writeBuffer(this.weightBuf, 0, this.weightData);
+    // same data viewed as vec4 (4x fewer weight loads in the MLP)
+    this.weight4Buf = d.createBuffer({ size: this.weightData.byteLength, usage: STORAGE });
+    d.queue.writeBuffer(this.weight4Buf, 0, this.weightData);
+    this.kernelBuf = d.createBuffer({
+      size: 27 * 4,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    this.paramsBuf = d.createBuffer({
+      size: 48,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
     this.allocGrid();
@@ -373,6 +209,7 @@ export class ShaderRunner implements CaEngine {
           { binding: 3, resource: { buffer: this.kernelBuf } },
           { binding: 4, resource: { buffer: this.tmpBuf } },
           { binding: 5, resource: { buffer: this.paramsBuf } },
+          { binding: 6, resource: { buffer: this.weight4Buf } },
         ],
       });
     const bg2 = (old: GPUBuffer, next: GPUBuffer): GPUBindGroup =>
@@ -454,7 +291,6 @@ export class ShaderRunner implements CaEngine {
 
   private flushEdits(): void {
     if (this.queuedEdits.length === 0) return;
-    // pending edits are applied to the CPU mirror after this step's `sync()`
     const queued = this.queuedEdits;
     this.queuedEdits = [];
     for (const fn of queued) fn(this.x);
@@ -503,8 +339,6 @@ export class ShaderRunner implements CaEngine {
     } finally {
       this.stepping = false;
     }
-    // edits made during the step are applied to the CPU mirror (which the caller
-    // refreshes via sync()); upload them next step.
     if (this.queuedEdits.length) {
       await this.sync();
       this.flushEdits();
@@ -624,6 +458,7 @@ export class ShaderRunner implements CaEngine {
       this.tmpBuf,
       this.fireBuf,
       this.weightBuf,
+      this.weight4Buf,
       this.kernelBuf,
       this.paramsBuf,
       this.staging,
