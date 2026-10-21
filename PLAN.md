@@ -156,16 +156,24 @@ frontend/                 Vite app (publicDir -> ../exports)
 ## Milestones
 
 1. **M1** — `export.py` + Python parity check at two shapes. ✅ done
-   - Uses the modern `torch.onnx.export(dynamo=True)` path (opset 18) with
-     `dynamic_shapes`. Gotcha: `dynamic_shapes` entries are **positional / forward
-     arg names** (`x`, `w`, `fire`, `step_size`), *not* ONNX input names.
-   - The dynamo graph is also smaller (14.9 KB vs 36.3 KB for the legacy exporter).
-2. **M2** — Vite app: load one model, grow, RGB view, play/pause/speed. ✅ done
-3. **M3** — channel/gradient/fire-mask views + timeline scrubber.
-4. **M4** — kernel lab + perturbation tools.
-5. **M5** — stats, polish, pin ORT build, profile graph-capture trade-off.
+   - `torch.onnx.export(dynamo=True)`, opset 19, `dynamic_shapes` (positional /
+     forward arg names, not ONNX input names), `external_data=False`.
+   - Wrap-padding is a single `Pad(mode="wrap")` (20 Slice/Concat nodes -> 1), and
+     the exporter also writes `weights.bin` for the WGSL engine.
+2. **M2** — Vite app: load a model, grow, RGB view, play/pause/speed. ✅ done
+3. **M3** — channel-mapping views, `1ch` toggle, brush, grid size. ✅ done
+4. **M4** — kernel lab (rotation + editable 3×3 kernels). ✅ done
+5. **M5** — performance: native WGSL engine (2 passes, zero-copy render + GPU
+   brush) plus a headless bench harness. See [`AGENTS.md`](AGENTS.md).
+
+## Not done yet
+
+- Timeline scrubber, per-channel stats over time.
+- Perception-view export (a graph that also outputs `[state, gx, gy]`).
+- Register-tiled shader (more headroom at large grids).
+- Tests/CI beyond `npm run build`, `compileall` and the bench harness.
 
 ## Open questions
 
-- Checkpoint handoff from the GPU cluster: same repo dir vs. separate artifacts path?
-  (Exporter already takes an arbitrary `--checkpoint` path, so this is low-risk.)
+- Checkpoint handoff from the GPU cluster: same repo dir vs. separate artifacts
+  path? (The exporter takes an arbitrary `--checkpoint` path, so this is low-risk.)

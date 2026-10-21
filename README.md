@@ -2,7 +2,11 @@
 
 A from-scratch PyTorch reimplementation of **Growing Neural Cellular Automata**
 (Mordvintsev, Randazzo, Niklasson & Levin, Distill 2020,
-<https://distill.pub/2020/growing-ca/>).
+<https://distill.pub/2020/growing-ca/>), plus a browser playground and a cluster
+training pipeline.
+
+> **Agents: start with [`AGENTS.md`](AGENTS.md)** — repo map, invariants, commands
+> and gotchas.
 
 Starting from a single seed cell, a tiny neural network (8,336 parameters)
 learns a local update rule that grows a target image, and — with the right
@@ -76,10 +80,10 @@ See [`PLAN.md`](PLAN.md) for the ONNX interface, the WebGPU frontend design and
 performance notes, and [`TRAINING.md`](TRAINING.md) for training on the ARNES
 SLURM cluster (H100, mixed-precision env, sweeps).
 
-## Web playground (WebGPU)
+## Web playground
 
-A Vite + TypeScript app runs the exported models in the browser on the WebGPU
-execution provider via `onnxruntime-web`.
+A Vite + TypeScript app runs the exported models live in the browser. See
+[`AGENTS.md`](AGENTS.md) for the architecture, commands and gotchas.
 
 ```bash
 cd frontend
@@ -87,20 +91,33 @@ npm install
 npm run dev      # http://localhost:5173
 ```
 
-It reads `exports/manifest.json`, loads the selected model, runs the CA step loop
-on the GPU, and renders the state. Controls: model picker, play/pause
-(<kbd>space</kbd>), single step (<kbd>s</kbd>), reset (<kbd>r</kbd>), add a channel
-view (<kbd>v</kbd>), and a speed slider.
+It reads `exports/manifest.json` and offers three inference engines:
 
-Any number of **channel-mapping views** can be added; each maps any three state
-channels to R/G/B and optionally composites with an alpha channel over a white or
-black background. The first view defaults to channels 0/1/2 with alpha 3 over
-white, so the default look is the usual RGB pattern. The models are served from
-`../exports` at `/models` by a small Vite plugin (Vite ignores a `publicDir`
-outside the project root), so run `uv run python -m nca.export ...` first.
+| engine | runtime | notes |
+| --- | --- | --- |
+| `WASM (CPU)` | `onnxruntime-web` WASM | default; fastest on weak GPUs |
+| `WebGPU (ORT)` | `onnxruntime-web` WebGPU EP | ~1–12 ms per graph node |
+| `WebGPU (shader)` | native WGSL | 2 compute passes, zero-copy render |
 
-> Requires a WebGPU-capable browser (Chrome/Edge 113+). If WebGPU is unavailable
-the app reports it in the status bar.
+Controls: model / engine / grid pickers, play-pause (<kbd>space</kbd>), step
+(<kbd>s</kbd>), reset (<kbd>r</kbd>), speed, canvas size, add channel view
+(<kbd>v</kbd>).
+
+- **Channel views** — any number of views, each mapping any three state channels
+  to R/G/B (plus optional alpha and background); a `1ch` tick shows one channel as
+  grayscale.
+- **Brush** — View / Set 1 / Set 0 / × (multiply) with a radius and factor; edits
+  the channels the window shows (tick `edit α` to also write channel 3).
+- **Kernel lab** — angle slider (Experiment 4: rotate the perception field with no
+  retraining), auto-rotate, three editable 3×3 kernels, and reset.
+- **Grid** — 48…256; the model has dynamic `H`/`W` and periodic boundaries, so it
+  runs on a larger torus without re-exporting.
+
+URL params: `?ep=wasm|webgpu|shader`, `?log=1` (ORT logs).
+
+Models are served from `../exports` at `/models` by a small Vite plugin (Vite
+ignores a `publicDir` outside the project root), so run
+`uv run python -m nca.export ...` first.
 
 ## The model
 
