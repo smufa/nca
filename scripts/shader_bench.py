@@ -79,6 +79,8 @@ def main() -> None:
     ap.add_argument("--shader", type=Path, default=None, help="override pass1.wgsl")
     ap.add_argument("--reference", action="store_true", help="run the ONNX comparison")
     ap.add_argument("--runs", type=int, default=3, help="benchmark repeats")
+    ap.add_argument("--covx", type=int, default=8, help="cells covered per workgroup in x")
+    ap.add_argument("--covy", type=int, default=8, help="cells covered per workgroup in y")
     args = ap.parse_args()
 
     out_dir = ROOT / "exports" / args.model
@@ -183,7 +185,7 @@ def main() -> None:
 
     bgs1 = [bg1(stateA), bg1(stateB)]
     bgs2 = [bg2(stateA, stateB), bg2(stateB, stateA)]
-    dispatch = (grid + 7) // 8
+    dispatch = ((grid + args.covx - 1) // args.covx, (grid + args.covy - 1) // args.covy)
 
     def run_steps(masks, cur):
         for m in masks:
@@ -192,12 +194,12 @@ def main() -> None:
             pass1 = enc.begin_compute_pass()
             pass1.set_pipeline(p1)
             pass1.set_bind_group(0, bgs1[cur])
-            pass1.dispatch_workgroups(dispatch, dispatch)
+            pass1.dispatch_workgroups(dispatch[0], dispatch[1])
             pass1.end()
             pass2 = enc.begin_compute_pass()
             pass2.set_pipeline(p2)
             pass2.set_bind_group(0, bgs2[cur])
-            pass2.dispatch_workgroups(dispatch, dispatch)
+            pass2.dispatch_workgroups(dispatch[0], dispatch[1])
             pass2.end()
             device.queue.submit([enc.finish()])
             cur ^= 1

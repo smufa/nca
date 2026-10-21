@@ -122,7 +122,10 @@ Findings so far (Intel UHD 620):
 - `vec4` weight loads + 4-hidden-at-a-time: **3.2–3.6×** (see `pass1.wgsl`).
   Current: 72² 1.54 ms · 128² 4.40 ms · 256² 16.8 ms.
 - Tried and **rejected** (slower): `perc` in workgroup shared memory
-  (`scripts/variants/` has the experiments), explicit 4-way ILP.
+  (added LDS + cost occupancy; the private array was in registers already),
+  explicit 4-way ILP (compiler already does it), a 16×16 workgroup, and 2-cell
+  register tiling (register spill → 5.2 ms and incorrect).
+  The experiments are kept in `scripts/variants/`.
 - Next lever if needed: register tiling (each thread handles several cells and
   reuses the same weight loads).
 
