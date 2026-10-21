@@ -168,5 +168,6 @@ Findings so far (Intel UHD 620):
 
 - Training: working; `regenerating` regime produces crisp, self-healing patterns.
 - Frontend: `shader` engine is the fast path; `wasm` is the compatibility default.
-- Cluster: 14/18 sweep models exported; 4 still to export when the cluster is back.
-- Next likely work: register-tiled shader, larger-grid/texture targets, per-channel stats / timeline UI.
+- Cluster: **all 18 sweep models exported** (24 models in `exports/`).
+- Next likely work: larger-grid/texture targets, per-channel stats / timeline UI,
+  and the remaining shader ideas listed above.

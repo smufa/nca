@@ -174,8 +174,7 @@ cd ~/nca && uv sync --no-sources --python 3.13 --group dev
 1. **T1** — env on cluster + H100 smoke test (imports, 100 iters). ✅ done
    (validated on an H100 MIG slice: `torch 2.14.1+cu130`, CUDA ok, loss drops)
 2. **T2** — one high-quality run (crab, regenerating) + ONNX export. ✅ done
-3. **T3** — sweep experiments 1–3 across the 6 targets. 🚧 14/18 exported;
-   `mushroom_{growing,persistent,regenerating}` + `turtle_regenerating` remain.
+3. **T3** — sweep experiments 1–3 across the 6 targets. ✅ done (18/18 exported)
 4. **T4** — compare/curate models, ship to the frontend. 🚧 20 models in `exports/`.
 
 ## Open questions
