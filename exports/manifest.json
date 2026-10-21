@@ -6,7 +6,7 @@
       "path": "cactus_growing/model.onnx",
       "meta": {
         "id": "cactus_growing",
-        "created": "2026-10-20T17:49:04",
+        "created": "2026-10-21T12:09:08",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -14,7 +14,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "growing",
         "target": "emoji:1f335",
         "source_checkpoint": "/tmp/sweep_runs/cactus_growing/ckpt_final.pt",
@@ -25,8 +25,8 @@
           "72": 4.76837158203125e-07,
           "80": 4.76837158203125e-07
         },
-        "size_bytes": 59432,
-        "git_rev": "302dead"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -34,7 +34,7 @@
       "path": "cactus_persistent/model.onnx",
       "meta": {
         "id": "cactus_persistent",
-        "created": "2026-10-20T17:49:12",
+        "created": "2026-10-21T12:09:27",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -42,7 +42,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "persistent",
         "target": "emoji:1f335",
         "source_checkpoint": "/tmp/sweep_runs/cactus_persistent/ckpt_final.pt",
@@ -53,8 +53,8 @@
           "72": 7.62939453125e-06,
           "80": 3.814697265625e-06
         },
-        "size_bytes": 59432,
-        "git_rev": "302dead"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -62,7 +62,7 @@
       "path": "cactus_regenerating/model.onnx",
       "meta": {
         "id": "cactus_regenerating",
-        "created": "2026-10-20T17:49:20",
+        "created": "2026-10-21T12:09:59",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -70,7 +70,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "regenerating",
         "target": "emoji:1f335",
         "source_checkpoint": "/tmp/sweep_runs/cactus_regenerating/ckpt_final.pt",
@@ -81,8 +81,8 @@
           "72": 9.5367431640625e-07,
           "80": 1.9073486328125e-06
         },
-        "size_bytes": 59432,
-        "git_rev": "302dead"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -90,7 +90,7 @@
       "path": "crab_growing/model.onnx",
       "meta": {
         "id": "crab_growing",
-        "created": "2026-10-20T17:49:28",
+        "created": "2026-10-21T12:10:28",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -98,7 +98,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "growing",
         "target": "emoji:1f980",
         "source_checkpoint": "/tmp/sweep_runs/crab_growing/ckpt_final.pt",
@@ -109,8 +109,8 @@
           "72": 9.5367431640625e-07,
           "80": 9.5367431640625e-07
         },
-        "size_bytes": 59432,
-        "git_rev": "302dead"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -118,7 +118,7 @@
       "path": "crab_persistent/model.onnx",
       "meta": {
         "id": "crab_persistent",
-        "created": "2026-10-20T17:49:36",
+        "created": "2026-10-21T12:10:39",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -126,7 +126,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "persistent",
         "target": "emoji:1f980",
         "source_checkpoint": "/tmp/sweep_runs/crab_persistent/ckpt_final.pt",
@@ -137,8 +137,8 @@
           "72": 7.62939453125e-06,
           "80": 3.814697265625e-06
         },
-        "size_bytes": 59432,
-        "git_rev": "302dead"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -146,7 +146,7 @@
       "path": "crab_regen_2000/model.onnx",
       "meta": {
         "id": "crab_regen_2000",
-        "created": "2026-10-20T14:04:19",
+        "created": "2026-10-21T12:12:55",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -154,7 +154,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "regenerating",
         "target": "emoji:1f980",
         "source_checkpoint": "/tmp/crab_regen/ckpt_002000.pt",
@@ -165,8 +165,8 @@
           "72": 9.5367431640625e-07,
           "80": 1.430511474609375e-06
         },
-        "size_bytes": 59432,
-        "git_rev": "b393a89"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -174,7 +174,7 @@
       "path": "crab_regen_4000/model.onnx",
       "meta": {
         "id": "crab_regen_4000",
-        "created": "2026-10-20T14:04:28",
+        "created": "2026-10-21T12:13:08",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -182,7 +182,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "regenerating",
         "target": "emoji:1f980",
         "source_checkpoint": "/tmp/crab_regen/ckpt_004000.pt",
@@ -193,8 +193,8 @@
           "72": 9.5367431640625e-07,
           "80": 9.5367431640625e-07
         },
-        "size_bytes": 59432,
-        "git_rev": "b393a89"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -202,7 +202,7 @@
       "path": "crab_regen_6000/model.onnx",
       "meta": {
         "id": "crab_regen_6000",
-        "created": "2026-10-20T14:04:37",
+        "created": "2026-10-21T12:13:20",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -210,7 +210,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "regenerating",
         "target": "emoji:1f980",
         "source_checkpoint": "/tmp/crab_regen/ckpt_006000.pt",
@@ -221,8 +221,8 @@
           "72": 9.5367431640625e-07,
           "80": 9.5367431640625e-07
         },
-        "size_bytes": 59432,
-        "git_rev": "b393a89"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -230,7 +230,7 @@
       "path": "crab_regen_8000/model.onnx",
       "meta": {
         "id": "crab_regen_8000",
-        "created": "2026-10-20T14:04:46",
+        "created": "2026-10-21T12:13:36",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -238,7 +238,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "regenerating",
         "target": "emoji:1f980",
         "source_checkpoint": "/tmp/crab_regen/ckpt_008000.pt",
@@ -249,8 +249,8 @@
           "72": 1.9073486328125e-06,
           "80": 9.5367431640625e-07
         },
-        "size_bytes": 59432,
-        "git_rev": "b393a89"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -258,7 +258,7 @@
       "path": "crab_regen_8000_static/model.onnx",
       "meta": {
         "id": "crab_regen_8000_static",
-        "created": "2026-10-20T14:52:48",
+        "created": "2026-10-21T12:13:47",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -266,7 +266,7 @@
         "grid": 72,
         "dynamic_shape": false,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "regenerating",
         "target": "emoji:1f980",
         "source_checkpoint": "/tmp/crab_regen/ckpt_008000.pt",
@@ -276,8 +276,8 @@
         "parity_max_abs_diff": {
           "72": 1.9073486328125e-06
         },
-        "size_bytes": 58661,
-        "git_rev": "22bb661"
+        "size_bytes": 49374,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -285,7 +285,7 @@
       "path": "crab_regenerating/model.onnx",
       "meta": {
         "id": "crab_regenerating",
-        "created": "2026-10-20T17:49:43",
+        "created": "2026-10-21T12:10:52",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -293,7 +293,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "regenerating",
         "target": "emoji:1f980",
         "source_checkpoint": "/tmp/sweep_runs/crab_regenerating/ckpt_final.pt",
@@ -304,8 +304,8 @@
           "72": 9.5367431640625e-07,
           "80": 1.9073486328125e-06
         },
-        "size_bytes": 59432,
-        "git_rev": "302dead"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -313,7 +313,7 @@
       "path": "octopus_growing/model.onnx",
       "meta": {
         "id": "octopus_growing",
-        "created": "2026-10-20T17:49:50",
+        "created": "2026-10-21T12:11:05",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -321,7 +321,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "growing",
         "target": "emoji:1f419",
         "source_checkpoint": "/tmp/sweep_runs/octopus_growing/ckpt_final.pt",
@@ -332,8 +332,8 @@
           "72": 1.430511474609375e-06,
           "80": 1.1920928955078125e-06
         },
-        "size_bytes": 59432,
-        "git_rev": "302dead"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -341,7 +341,7 @@
       "path": "octopus_persistent/model.onnx",
       "meta": {
         "id": "octopus_persistent",
-        "created": "2026-10-20T17:49:58",
+        "created": "2026-10-21T12:11:17",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -349,7 +349,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "persistent",
         "target": "emoji:1f419",
         "source_checkpoint": "/tmp/sweep_runs/octopus_persistent/ckpt_final.pt",
@@ -360,8 +360,8 @@
           "72": 1.9073486328125e-06,
           "80": 1.9073486328125e-06
         },
-        "size_bytes": 59432,
-        "git_rev": "302dead"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -369,7 +369,7 @@
       "path": "octopus_regenerating/model.onnx",
       "meta": {
         "id": "octopus_regenerating",
-        "created": "2026-10-20T17:50:05",
+        "created": "2026-10-21T12:11:29",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -377,7 +377,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "regenerating",
         "target": "emoji:1f419",
         "source_checkpoint": "/tmp/sweep_runs/octopus_regenerating/ckpt_final.pt",
@@ -388,8 +388,8 @@
           "72": 9.5367431640625e-07,
           "80": 9.5367431640625e-07
         },
-        "size_bytes": 59432,
-        "git_rev": "302dead"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -397,7 +397,7 @@
       "path": "smile-demo/model.onnx",
       "meta": {
         "id": "smile-demo",
-        "created": "2026-10-20T11:25:05",
+        "created": "2026-10-21T12:13:57",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -405,7 +405,7 @@
         "grid": 32,
         "dynamic_shape": true,
         "wrap": false,
-        "opset": 18,
+        "opset": 19,
         "experiment": "regenerating",
         "target": "emoji:\ud83d\ude00",
         "source_checkpoint": "/tmp/nca_smile/ckpt_final.pt",
@@ -417,7 +417,7 @@
           "40": 1.1920928955078125e-07
         },
         "size_bytes": 48032,
-        "git_rev": "343be98"
+        "git_rev": "f365e88"
       }
     },
     {
@@ -425,7 +425,7 @@
       "path": "trex_growing/model.onnx",
       "meta": {
         "id": "trex_growing",
-        "created": "2026-10-20T17:50:13",
+        "created": "2026-10-21T12:11:42",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -433,7 +433,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "growing",
         "target": "emoji:1f996",
         "source_checkpoint": "/tmp/sweep_runs/trex_growing/ckpt_final.pt",
@@ -444,8 +444,8 @@
           "72": 7.152557373046875e-07,
           "80": 1.1920928955078125e-06
         },
-        "size_bytes": 59432,
-        "git_rev": "302dead"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -453,7 +453,7 @@
       "path": "trex_persistent/model.onnx",
       "meta": {
         "id": "trex_persistent",
-        "created": "2026-10-20T17:50:20",
+        "created": "2026-10-21T12:11:53",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -461,7 +461,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "persistent",
         "target": "emoji:1f996",
         "source_checkpoint": "/tmp/sweep_runs/trex_persistent/ckpt_final.pt",
@@ -472,8 +472,8 @@
           "72": 3.814697265625e-06,
           "80": 3.0517578125e-05
         },
-        "size_bytes": 59432,
-        "git_rev": "302dead"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -481,7 +481,7 @@
       "path": "trex_regenerating/model.onnx",
       "meta": {
         "id": "trex_regenerating",
-        "created": "2026-10-20T17:50:27",
+        "created": "2026-10-21T12:12:05",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -489,7 +489,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "regenerating",
         "target": "emoji:1f996",
         "source_checkpoint": "/tmp/sweep_runs/trex_regenerating/ckpt_final.pt",
@@ -500,8 +500,8 @@
           "72": 1.430511474609375e-06,
           "80": 9.5367431640625e-07
         },
-        "size_bytes": 59432,
-        "git_rev": "302dead"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -509,7 +509,7 @@
       "path": "turtle_growing/model.onnx",
       "meta": {
         "id": "turtle_growing",
-        "created": "2026-10-20T17:50:34",
+        "created": "2026-10-21T12:12:19",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -517,7 +517,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "growing",
         "target": "emoji:1f422",
         "source_checkpoint": "/tmp/sweep_runs/turtle_growing/ckpt_final.pt",
@@ -528,8 +528,8 @@
           "72": 4.76837158203125e-07,
           "80": 4.76837158203125e-07
         },
-        "size_bytes": 59432,
-        "git_rev": "302dead"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     },
     {
@@ -537,7 +537,7 @@
       "path": "turtle_persistent/model.onnx",
       "meta": {
         "id": "turtle_persistent",
-        "created": "2026-10-20T17:50:42",
+        "created": "2026-10-21T12:12:35",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -545,7 +545,7 @@
         "grid": 72,
         "dynamic_shape": true,
         "wrap": true,
-        "opset": 18,
+        "opset": 19,
         "experiment": "persistent",
         "target": "emoji:1f422",
         "source_checkpoint": "/tmp/sweep_runs/turtle_persistent/ckpt_final.pt",
@@ -556,10 +556,10 @@
           "72": 9.5367431640625e-07,
           "80": 3.814697265625e-06
         },
-        "size_bytes": 59432,
-        "git_rev": "302dead"
+        "size_bytes": 49741,
+        "git_rev": "f365e88"
       }
     }
   ],
-  "generated": "2026-10-20T17:50:42"
+  "generated": "2026-10-21T12:13:57"
 }

@@ -1,6 +1,6 @@
 {
   "id": "smile-demo",
-  "created": "2026-10-20T11:25:05",
+  "created": "2026-10-21T12:13:57",
   "channel_n": 16,
   "hidden_n": 128,
   "fire_rate": 0.5,
@@ -8,7 +8,7 @@
   "grid": 32,
   "dynamic_shape": true,
   "wrap": false,
-  "opset": 18,
+  "opset": 19,
   "experiment": "regenerating",
   "target": "emoji:\ud83d\ude00",
   "source_checkpoint": "/tmp/nca_smile/ckpt_final.pt",
@@ -20,5 +20,5 @@
     "40": 1.1920928955078125e-07
   },
   "size_bytes": 48032,
-  "git_rev": "343be98"
+  "git_rev": "f365e88"
 }

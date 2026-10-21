@@ -1,6 +1,6 @@
 {
   "id": "crab_regen_2000",
-  "created": "2026-10-20T14:04:19",
+  "created": "2026-10-21T12:12:55",
   "channel_n": 16,
   "hidden_n": 128,
   "fire_rate": 0.5,
@@ -8,7 +8,7 @@
   "grid": 72,
   "dynamic_shape": true,
   "wrap": true,
-  "opset": 18,
+  "opset": 19,
   "experiment": "regenerating",
   "target": "emoji:1f980",
   "source_checkpoint": "/tmp/crab_regen/ckpt_002000.pt",
@@ -19,6 +19,6 @@
     "72": 9.5367431640625e-07,
     "80": 1.430511474609375e-06
   },
-  "size_bytes": 59432,
-  "git_rev": "b393a89"
+  "size_bytes": 49741,
+  "git_rev": "f365e88"
 }

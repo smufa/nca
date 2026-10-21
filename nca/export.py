@@ -31,7 +31,7 @@ import torch.nn.functional as F
 from .model import NeuralCA, _circular_pad2d, _perception_kernels, get_living_mask
 from .viz import render, save_image
 
-DEFAULT_OPSET = 18
+DEFAULT_OPSET = 19
 
 
 class ExportStep(nn.Module):

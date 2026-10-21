@@ -20,16 +20,13 @@ ALIVE_THRESHOLD = 0.1
 def _circular_pad2d(x: torch.Tensor, pad: int) -> torch.Tensor:
     """Wrap-pad the last two dimensions (periodic / toroidal boundaries).
 
-    Implemented with slicing + ``cat`` (rather than ``F.pad(..., mode='circular')``)
-    so the exact same graph exports cleanly to ONNX on opset 18.
+    Exports as a single ONNX ``Pad`` (mode ``wrap``, opset 19) instead of a
+    Slice/Concat sandwich, which keeps the per-step graph small - and every graph
+    node is a separate WebGPU dispatch.
     """
     if pad == 0:
         return x
-    # width (last dim): left/right wraps
-    x = torch.cat([x[..., -pad:], x, x[..., :pad]], dim=-1)
-    # height (second-to-last dim): top/bottom wraps
-    x = torch.cat([x[..., -pad:, :], x, x[..., :pad, :]], dim=-2)
-    return x
+    return F.pad(x, (pad, pad, pad, pad), mode="circular")
 
 
 def get_living_mask(x: torch.Tensor, wrap: bool = True) -> torch.Tensor:
