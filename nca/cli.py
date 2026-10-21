@@ -89,6 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="torch.compile the CA step (faster unroll on GPU)",
     )
+    p.add_argument(
+        "--amp",
+        choices=["off", "bf16"],
+        default="off",
+        help="autocast dtype for the unroll (bf16 may be ~2x on compute-bound GPUs)",
+    )
 
     p.add_argument("--device", default="auto")
     p.add_argument("--threads", type=int, default=None, help="torch CPU threads")
@@ -165,6 +171,7 @@ def main(argv: list[str] | None = None) -> None:
         gif_steps=args.gif_steps,
         seed=args.seed,
         compile=args.compile,
+        amp=args.amp,
     )
 
     ca = NeuralCA(

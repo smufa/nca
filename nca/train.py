@@ -42,6 +42,7 @@ class TrainConfig:
     make_gif: bool = True
     seed: int = 0
     compile: bool = False
+    amp: str = "off"  # off | bf16
 
 
 def per_sample_loss(x: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -80,8 +81,11 @@ def _train_step(
         torch.randint(cfg.train_steps_min, cfg.train_steps_max, (1,), generator=generator)
     )
     x = x0
-    x = forward(x, n)
-    loss = loss_fn(x, target)
+    with torch.autocast(
+        device_type="cuda", dtype=torch.bfloat16, enabled=cfg.amp == "bf16"
+    ):
+        x = forward(x, n)
+    loss = loss_fn(x, target)  # fp32, so the reported loss stays comparable
 
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
