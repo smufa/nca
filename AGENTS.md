@@ -126,8 +126,13 @@ Findings so far (Intel UHD 620):
   explicit 4-way ILP (compiler already does it), a 16×16 workgroup, and 2-cell
   register tiling (register spill → 5.2 ms and incorrect).
   The experiments are kept in `scripts/variants/`.
-- Next lever if needed: register tiling (each thread handles several cells and
-  reuses the same weight loads).
+- Remaining ideas (not tried):
+  1. **Tiled GEMM for the MLP** (tile cells into shared memory, stream the weights
+     once per tile) — the proper fix at 512²+, but a real WGSL matmul project.
+  2. **fp16** weights/activations — the iGPU exposes `shader-f16`; maybe ~2×, but
+     real precision risk (the bench settles it immediately).
+  3. **Split hidden units across workgroups** and reduce `dx` with atomics to cut
+     per-thread weight reads.
 
 ## Gotchas
 
