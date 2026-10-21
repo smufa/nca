@@ -80,8 +80,7 @@ def _train_step(
         torch.randint(cfg.train_steps_min, cfg.train_steps_max, (1,), generator=generator)
     )
     x = x0
-    for _ in range(n):
-        x = forward(x)
+    x = forward(x, n)
     loss = loss_fn(x, target)
 
     optimizer.zero_grad(set_to_none=True)
@@ -143,8 +142,25 @@ def train(
         torch.set_float32_matmul_precision("high")
 
     ca.to(device)
-    # Compile the step to cut per-kernel launch overhead in the ~80-step unroll.
-    forward = torch.compile(ca) if cfg.compile else ca
+
+    # The unroll is ~80 sequential steps, so the per-call dispatch overhead
+    # dominates. Compiling the *whole sequence* (not just the module) turns it
+    # into one graph. n is specialised per value, so pair this with a fixed
+    # --train-steps range.
+    if cfg.compile:
+
+        @torch.compile(dynamic=False)
+        def forward(x: torch.Tensor, n: int) -> torch.Tensor:
+            for _ in range(n):
+                x = ca(x)
+            return x
+
+    else:
+
+        def forward(x: torch.Tensor, n: int) -> torch.Tensor:
+            for _ in range(n):
+                x = ca(x)
+            return x
     target = target.to(device)
     seed = seed.to(device)
     _, h, w = seed.shape
