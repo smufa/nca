@@ -28,65 +28,6 @@ struct Params {
 fn sidx(c: u32, y: u32, x: u32) -> u32 { return (c * p.H + y) * p.W + x; }
 `;
 
-const PASS1 = /* wgsl */ `
-${PARAMS_STRUCT}
-@group(0) @binding(0) var<storage, read> state: array<f32>;
-@group(0) @binding(1) var<storage, read> fire: array<f32>;
-@group(0) @binding(2) var<storage, read> weights: array<f32>;
-@group(0) @binding(3) var<storage, read> kernel: array<f32>;
-@group(0) @binding(4) var<storage, read_write> out: array<f32>;
-@group(0) @binding(5) var<uniform> p: Params;
-
-@compute @workgroup_size(${WG}, ${WG}, 1)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let x = gid.x;
-  let y = gid.y;
-  if (x >= p.W || y >= p.H) { return; }
-
-  // perception: for each channel, [identity, dx, dy] responses (order matches the
-  // depthwise conv: out channel = 3*ci + cm)
-  var perc: array<f32, 48>;
-  for (var c: u32 = 0u; c < 16u; c = c + 1u) {
-    var ki = 0.0;
-    var kx = 0.0;
-    var ky = 0.0;
-    for (var dy: u32 = 0u; dy < 3u; dy = dy + 1u) {
-      for (var dx: u32 = 0u; dx < 3u; dx = dx + 1u) {
-        let yy = (y + dy + p.H - 1u) % p.H;
-        let xx = (x + dx + p.W - 1u) % p.W;
-        let s = state[sidx(c, yy, xx)];
-        let k = dy * 3u + dx;
-        ki = ki + s * kernel[k];
-        kx = kx + s * kernel[9u + k];
-        ky = ky + s * kernel[18u + k];
-      }
-    }
-    perc[c * 3u] = ki;
-    perc[c * 3u + 1u] = kx;
-    perc[c * 3u + 2u] = ky;
-  }
-
-  // update rule: dx = W2 * relu(W1 * perc + b1) + b2, fused (no hidden array)
-  var dxv: array<f32, 16>;
-  for (var c: u32 = 0u; c < 16u; c = c + 1u) { dxv[c] = weights[p.b2 + c]; }
-  for (var j: u32 = 0u; j < p.hidden; j = j + 1u) {
-    var h = weights[p.b1 + j];
-    for (var i: u32 = 0u; i < 48u; i = i + 1u) {
-      h = h + weights[p.w1 + j * 48u + i] * perc[i];
-    }
-    h = max(h, 0.0);
-    for (var c: u32 = 0u; c < 16u; c = c + 1u) {
-      dxv[c] = dxv[c] + weights[p.w2 + c * p.hidden + j] * h;
-    }
-  }
-
-  let f = fire[y * p.W + x];
-  for (var c: u32 = 0u; c < 16u; c = c + 1u) {
-    out[sidx(c, y, x)] = state[sidx(c, y, x)] + dxv[c] * f * p.step;
-  }
-}
-`;
-
 const PASS2 = /* wgsl */ `
 ${PARAMS_STRUCT}
 @group(0) @binding(0) var<storage, read> old: array<f32>;
@@ -118,6 +59,79 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 `;
 
 const STORAGE = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
+
+const WGX = WG;
+const WGY = WG;
+const WGS = WGX * WGY;
+// Per-thread perception stride, padded from 48 so consecutive threads land on
+// different shared-memory banks (48 % 32 == 16 would be a 16-way conflict).
+const PSTRIDE = 49;
+
+const PASS1 = /* wgsl */ `
+${PARAMS_STRUCT}
+const PSTRIDE: u32 = ${PSTRIDE}u;
+var<workgroup> perc_sh: array<f32, ${WGS * PSTRIDE}>;
+
+@group(0) @binding(0) var<storage, read> state: array<f32>;
+@group(0) @binding(1) var<storage, read> fire: array<f32>;
+@group(0) @binding(2) var<storage, read> weights: array<f32>;
+@group(0) @binding(3) var<storage, read> kernel: array<f32>;
+@group(0) @binding(4) var<storage, read_write> out: array<f32>;
+@group(0) @binding(5) var<uniform> p: Params;
+
+@compute @workgroup_size(${WGX}, ${WGY}, 1)
+fn main(
+  @builtin(global_invocation_id) gid: vec3<u32>,
+  @builtin(local_invocation_index) lid: u32,
+) {
+  let x = gid.x;
+  let y = gid.y;
+  if (x >= p.W || y >= p.H) { return; }
+  let base = lid * PSTRIDE;
+
+  // perception into shared memory (each thread owns its 48-float region, so no
+  // barrier is needed). Dynamic indexing of shared memory is cheap, unlike a
+  // dynamically-indexed private array which spills to local memory.
+  for (var c: u32 = 0u; c < 16u; c = c + 1u) {
+    var ki = 0.0;
+    var kx = 0.0;
+    var ky = 0.0;
+    for (var dy: u32 = 0u; dy < 3u; dy = dy + 1u) {
+      for (var dx: u32 = 0u; dx < 3u; dx = dx + 1u) {
+        let yy = (y + dy + p.H - 1u) % p.H;
+        let xx = (x + dx + p.W - 1u) % p.W;
+        let s = state[sidx(c, yy, xx)];
+        let k = dy * 3u + dx;
+        ki = ki + s * kernel[k];
+        kx = kx + s * kernel[9u + k];
+        ky = ky + s * kernel[18u + k];
+      }
+    }
+    perc_sh[base + c * 3u] = ki;
+    perc_sh[base + c * 3u + 1u] = kx;
+    perc_sh[base + c * 3u + 2u] = ky;
+  }
+
+  // update rule: dx = W2 * relu(W1 * perc + b1) + b2, fused
+  var dxv: array<f32, 16>;
+  for (var c: u32 = 0u; c < 16u; c = c + 1u) { dxv[c] = weights[p.b2 + c]; }
+  for (var j: u32 = 0u; j < p.hidden; j = j + 1u) {
+    var h = weights[p.b1 + j];
+    for (var i: u32 = 0u; i < 48u; i = i + 1u) {
+      h = h + weights[p.w1 + j * 48u + i] * perc_sh[base + i];
+    }
+    h = max(h, 0.0);
+    for (var c: u32 = 0u; c < 16u; c = c + 1u) {
+      dxv[c] = dxv[c] + weights[p.w2 + c * p.hidden + j] * h;
+    }
+  }
+
+  let f = fire[y * p.W + x];
+  for (var c: u32 = 0u; c < 16u; c = c + 1u) {
+    out[sidx(c, y, x)] = state[sidx(c, y, x)] + dxv[c] * f * p.step;
+  }
+}
+`;
 
 const DRAW_WGSL = /* wgsl */ `
 struct DrawParams {
