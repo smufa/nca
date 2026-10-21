@@ -1,6 +1,6 @@
 {
   "id": "crab_regen_2000",
-  "created": "2026-10-21T12:12:55",
+  "created": "2026-10-21T12:33:11",
   "channel_n": 16,
   "hidden_n": 128,
   "fire_rate": 0.5,
@@ -19,6 +19,18 @@
     "72": 9.5367431640625e-07,
     "80": 1.430511474609375e-06
   },
+  "weights": {
+    "file": "weights.bin",
+    "channel_n": 16,
+    "hidden_n": 128,
+    "offsets": {
+      "w1": 0,
+      "b1": 6144,
+      "w2": 6272,
+      "b2": 8320
+    },
+    "count": 8336
+  },
   "size_bytes": 49741,
-  "git_rev": "f365e88"
+  "git_rev": "99a3538"
 }

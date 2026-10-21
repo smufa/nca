@@ -219,6 +219,32 @@ def _update_manifest(out_dir: Path, entry: dict) -> None:
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
 
+def _save_weights(ca: NeuralCA, model_dir: Path) -> dict:
+    """Dump the update-rule MLP as a flat float32 blob for the WGSL engine.
+
+    Layout in floats: ``W1 [hidden, 3C]``, ``b1 [hidden]``, ``W2 [C, hidden]``,
+    ``b2 [C]`` - row-major, matching ``ca.update``.
+    """
+    w1 = ca.update[0].weight.detach().reshape(-1).cpu().numpy().astype("<f4")
+    b1 = ca.update[0].bias.detach().reshape(-1).cpu().numpy().astype("<f4")
+    w2 = ca.update[2].weight.detach().reshape(-1).cpu().numpy().astype("<f4")
+    b2 = ca.update[2].bias.detach().reshape(-1).cpu().numpy().astype("<f4")
+    blob = np.concatenate([w1, b1, w2, b2])
+    (model_dir / "weights.bin").write_bytes(blob.tobytes())
+    return {
+        "file": "weights.bin",
+        "channel_n": int(ca.channel_n),
+        "hidden_n": int(w1.size // (3 * ca.channel_n)),
+        "offsets": {
+            "w1": 0,
+            "b1": int(w1.size),
+            "w2": int(w1.size + b1.size),
+            "b2": int(w1.size + b1.size + w2.size),
+        },
+        "count": int(blob.size),
+    }
+
+
 def export_one(
     checkpoint: str | Path,
     model_id: str,
@@ -256,6 +282,8 @@ def export_one(
     if target_arr is not None:
         save_image(render(torch.from_numpy(target_arr))[0], model_dir / "target.png")
 
+    weight_layout = _save_weights(ca, model_dir)
+
     model_proto = onnx.load(str(onnx_path))
     meta = {
         "id": model_id,
@@ -275,6 +303,7 @@ def export_one(
         "onnxruntime_version": ort.__version__,
         "onnx_ir_version": model_proto.ir_version,
         "parity_max_abs_diff": parity,
+        "weights": weight_layout,
         "size_bytes": onnx_path.stat().st_size,
         "git_rev": _git_rev(),
     }

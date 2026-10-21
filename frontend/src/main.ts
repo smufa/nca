@@ -2,6 +2,8 @@ import './style.css';
 import { loadManifest } from './models';
 import type { Manifest, ManifestModel } from './models';
 import { CaRunner } from './runner';
+import { ShaderRunner } from './shader';
+import type { CaEngine } from './engine';
 import { CANONICAL_KERNELS, mapChannels, rotateKernels } from './nca';
 import type { ChannelMapping } from './nca';
 
@@ -60,7 +62,7 @@ interface Stroke {
 let stroke: Stroke | null = null;
 
 let manifest: Manifest | null = null;
-let runner: CaRunner | null = null;
+let runner: CaEngine | null = null;
 let views: View[] = [];
 let playing = false;
 let busy = false;
@@ -69,16 +71,17 @@ let selectToken = 0;
 let accumulator = 0;
 let lastT = performance.now();
 
-type Ep = 'webgpu' | 'wasm';
+type Ep = 'webgpu' | 'wasm' | 'shader';
 
 /** Engine from ?ep= (persisted) or localStorage; default WASM (faster on many GPUs). */
 function initialEp(): Ep {
   const url = new URLSearchParams(location.search).get('ep');
-  if (url === 'webgpu' || url === 'wasm') {
+  if (url === 'webgpu' || url === 'wasm' || url === 'shader') {
     localStorage.setItem('nca.ep', url);
     return url;
   }
-  return localStorage.getItem('nca.ep') === 'webgpu' ? 'webgpu' : 'wasm';
+  const stored = localStorage.getItem('nca.ep');
+  return stored === 'webgpu' || stored === 'shader' ? stored : 'wasm';
 }
 
 let ep: Ep = initialEp();
@@ -561,7 +564,10 @@ async function selectModel(model: ManifestModel): Promise<void> {
   }
   prevPerf = { maskMs: 0, runMs: 0, syncMs: 0, steps: 0 };
   try {
-    runner = await CaRunner.create(model, ep);
+    runner =
+      ep === 'shader'
+        ? await ShaderRunner.create(model)
+        : await CaRunner.create(model, ep);
   } catch (e) {
     setStatus(`failed to load: ${(e as Error).message}`, 'err');
     console.error(e);
@@ -572,7 +578,9 @@ async function selectModel(model: ManifestModel): Promise<void> {
   gridSizeSelect.value = String(runner.grid);
   drawAll();
   updateInfo();
-  setStatus(`ready · ${runner.mode === 'gpu' ? 'WebGPU' : 'WASM'}`, 'ok');
+  const label =
+    runner.mode === 'gpu' ? 'WebGPU' : runner.mode === 'shader' ? 'WebGPU shader' : 'WASM';
+  setStatus(`ready · ${label}`, 'ok');
 }
 
 async function loadModels(): Promise<void> {

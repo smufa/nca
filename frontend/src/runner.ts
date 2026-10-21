@@ -2,6 +2,7 @@ import * as ort from 'onnxruntime-web/webgpu';
 import type { ManifestModel } from './models';
 import { buildPerceptionWeight, CANONICAL_KERNELS, mulberry32, seedState } from './nca';
 import type { Rng } from './nca';
+import type { CaEngine } from './engine';
 
 // Single-threaded WASM core is enough: the heavy lifting runs on the WebGPU EP,
 // and this avoids needing cross-origin-isolation (SharedArrayBuffer) headers.
@@ -24,7 +25,7 @@ const STATE_USAGE =
  * state buffer (`session.run(feeds, fetches)`), and we only download the state
  * for rendering (`sync`). If that setup fails we fall back to CPU tensors.
  */
-export class CaRunner {
+export class CaRunner implements CaEngine {
   readonly meta: ManifestModel['meta'];
   readonly channelN: number;
   grid: number;
@@ -82,25 +83,8 @@ export class CaRunner {
     ep: 'webgpu' | 'wasm' = 'webgpu',
     seed = 1,
   ): Promise<CaRunner> {
-    // `?wgtune=1` turns off ONNX-side validation and enables buffer caching for
-    // non-storage buffers (both off by default for WebGPU).
-    const wgtune = new URLSearchParams(location.search).has('wgtune');
-    const providers: ort.InferenceSession.ExecutionProviderConfig[] =
-      ep === 'wasm'
-        ? ['wasm']
-        : wgtune
-          ? [
-              {
-                name: 'webgpu',
-                validationMode: 'disabled',
-                defaultBufferCacheMode: 'bucket',
-                queryResolveBufferCacheMode: 'bucket',
-              },
-            ]
-          : ['webgpu'];
-
     const session = await ort.InferenceSession.create(`/models/${model.path}`, {
-      executionProviders: providers,
+      executionProviders: ep === 'wasm' ? ['wasm'] : ['webgpu'],
     });
     const runner = new CaRunner(session, model.meta, seed);
     if (ep === 'webgpu') await runner.setupGpu();

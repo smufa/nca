@@ -17,6 +17,13 @@ export interface ModelMeta {
   torch_version: string;
   onnxruntime_version: string;
   parity_max_abs_diff: Record<string, number> | null;
+  weights: {
+    file: string;
+    channel_n: number;
+    hidden_n: number;
+    offsets: { w1: number; b1: number; w2: number; b2: number };
+    count: number;
+  };
   size_bytes: number;
   git_rev: string | null;
 }

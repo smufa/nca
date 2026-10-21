@@ -6,7 +6,7 @@
       "path": "cactus_growing/model.onnx",
       "meta": {
         "id": "cactus_growing",
-        "created": "2026-10-21T12:09:08",
+        "created": "2026-10-21T12:30:28",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -25,8 +25,20 @@
           "72": 4.76837158203125e-07,
           "80": 4.76837158203125e-07
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -34,7 +46,7 @@
       "path": "cactus_persistent/model.onnx",
       "meta": {
         "id": "cactus_persistent",
-        "created": "2026-10-21T12:09:27",
+        "created": "2026-10-21T12:30:40",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -53,8 +65,20 @@
           "72": 7.62939453125e-06,
           "80": 3.814697265625e-06
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -62,7 +86,7 @@
       "path": "cactus_regenerating/model.onnx",
       "meta": {
         "id": "cactus_regenerating",
-        "created": "2026-10-21T12:09:59",
+        "created": "2026-10-21T12:30:51",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -81,8 +105,20 @@
           "72": 9.5367431640625e-07,
           "80": 1.9073486328125e-06
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -90,7 +126,7 @@
       "path": "crab_growing/model.onnx",
       "meta": {
         "id": "crab_growing",
-        "created": "2026-10-21T12:10:28",
+        "created": "2026-10-21T12:31:03",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -109,8 +145,20 @@
           "72": 9.5367431640625e-07,
           "80": 9.5367431640625e-07
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -118,7 +166,7 @@
       "path": "crab_persistent/model.onnx",
       "meta": {
         "id": "crab_persistent",
-        "created": "2026-10-21T12:10:39",
+        "created": "2026-10-21T12:31:14",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -137,8 +185,20 @@
           "72": 7.62939453125e-06,
           "80": 3.814697265625e-06
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -146,7 +206,7 @@
       "path": "crab_regen_2000/model.onnx",
       "meta": {
         "id": "crab_regen_2000",
-        "created": "2026-10-21T12:12:55",
+        "created": "2026-10-21T12:33:11",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -165,8 +225,20 @@
           "72": 9.5367431640625e-07,
           "80": 1.430511474609375e-06
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -174,7 +246,7 @@
       "path": "crab_regen_4000/model.onnx",
       "meta": {
         "id": "crab_regen_4000",
-        "created": "2026-10-21T12:13:08",
+        "created": "2026-10-21T12:33:22",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -193,8 +265,20 @@
           "72": 9.5367431640625e-07,
           "80": 9.5367431640625e-07
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -202,7 +286,7 @@
       "path": "crab_regen_6000/model.onnx",
       "meta": {
         "id": "crab_regen_6000",
-        "created": "2026-10-21T12:13:20",
+        "created": "2026-10-21T12:33:34",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -221,8 +305,20 @@
           "72": 9.5367431640625e-07,
           "80": 9.5367431640625e-07
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -230,7 +326,7 @@
       "path": "crab_regen_8000/model.onnx",
       "meta": {
         "id": "crab_regen_8000",
-        "created": "2026-10-21T12:13:36",
+        "created": "2026-10-21T12:33:46",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -249,8 +345,20 @@
           "72": 1.9073486328125e-06,
           "80": 9.5367431640625e-07
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -258,7 +366,7 @@
       "path": "crab_regen_8000_static/model.onnx",
       "meta": {
         "id": "crab_regen_8000_static",
-        "created": "2026-10-21T12:13:47",
+        "created": "2026-10-21T12:33:55",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -276,8 +384,20 @@
         "parity_max_abs_diff": {
           "72": 1.9073486328125e-06
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49374,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -285,7 +405,7 @@
       "path": "crab_regenerating/model.onnx",
       "meta": {
         "id": "crab_regenerating",
-        "created": "2026-10-21T12:10:52",
+        "created": "2026-10-21T12:31:26",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -304,8 +424,20 @@
           "72": 9.5367431640625e-07,
           "80": 1.9073486328125e-06
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -313,7 +445,7 @@
       "path": "octopus_growing/model.onnx",
       "meta": {
         "id": "octopus_growing",
-        "created": "2026-10-21T12:11:05",
+        "created": "2026-10-21T12:31:37",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -332,8 +464,20 @@
           "72": 1.430511474609375e-06,
           "80": 1.1920928955078125e-06
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -341,7 +485,7 @@
       "path": "octopus_persistent/model.onnx",
       "meta": {
         "id": "octopus_persistent",
-        "created": "2026-10-21T12:11:17",
+        "created": "2026-10-21T12:31:49",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -360,8 +504,20 @@
           "72": 1.9073486328125e-06,
           "80": 1.9073486328125e-06
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -369,7 +525,7 @@
       "path": "octopus_regenerating/model.onnx",
       "meta": {
         "id": "octopus_regenerating",
-        "created": "2026-10-21T12:11:29",
+        "created": "2026-10-21T12:32:01",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -388,8 +544,20 @@
           "72": 9.5367431640625e-07,
           "80": 9.5367431640625e-07
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -397,7 +565,7 @@
       "path": "smile-demo/model.onnx",
       "meta": {
         "id": "smile-demo",
-        "created": "2026-10-21T12:13:57",
+        "created": "2026-10-21T12:34:04",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -416,8 +584,20 @@
           "32": 1.341104507446289e-07,
           "40": 1.1920928955078125e-07
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 48032,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -425,7 +605,7 @@
       "path": "trex_growing/model.onnx",
       "meta": {
         "id": "trex_growing",
-        "created": "2026-10-21T12:11:42",
+        "created": "2026-10-21T12:32:12",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -444,8 +624,20 @@
           "72": 7.152557373046875e-07,
           "80": 1.1920928955078125e-06
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -453,7 +645,7 @@
       "path": "trex_persistent/model.onnx",
       "meta": {
         "id": "trex_persistent",
-        "created": "2026-10-21T12:11:53",
+        "created": "2026-10-21T12:32:24",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -472,8 +664,20 @@
           "72": 3.814697265625e-06,
           "80": 3.0517578125e-05
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -481,7 +685,7 @@
       "path": "trex_regenerating/model.onnx",
       "meta": {
         "id": "trex_regenerating",
-        "created": "2026-10-21T12:12:05",
+        "created": "2026-10-21T12:32:36",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -500,8 +704,20 @@
           "72": 1.430511474609375e-06,
           "80": 9.5367431640625e-07
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -509,7 +725,7 @@
       "path": "turtle_growing/model.onnx",
       "meta": {
         "id": "turtle_growing",
-        "created": "2026-10-21T12:12:19",
+        "created": "2026-10-21T12:32:47",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -528,8 +744,20 @@
           "72": 4.76837158203125e-07,
           "80": 4.76837158203125e-07
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     },
     {
@@ -537,7 +765,7 @@
       "path": "turtle_persistent/model.onnx",
       "meta": {
         "id": "turtle_persistent",
-        "created": "2026-10-21T12:12:35",
+        "created": "2026-10-21T12:32:59",
         "channel_n": 16,
         "hidden_n": 128,
         "fire_rate": 0.5,
@@ -556,10 +784,22 @@
           "72": 9.5367431640625e-07,
           "80": 3.814697265625e-06
         },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
         "size_bytes": 49741,
-        "git_rev": "f365e88"
+        "git_rev": "99a3538"
       }
     }
   ],
-  "generated": "2026-10-21T12:13:57"
+  "generated": "2026-10-21T12:34:04"
 }
