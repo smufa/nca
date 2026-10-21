@@ -7,6 +7,11 @@ import type { Rng } from './nca';
 // and this avoids needing cross-origin-isolation (SharedArrayBuffer) headers.
 ort.env.wasm.numThreads = 1;
 
+// `?log=info` / `?log=verbose` surfaces ORT's logs (e.g. nodes not assigned to
+// the WebGPU EP). Useful for diagnosing slow WebGPU runs.
+const _log = new URLSearchParams(location.search).get('log');
+if (_log) ort.env.logLevel = _log === 'verbose' ? 'verbose' : 'info';
+
 const STATE_USAGE =
   GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
 
