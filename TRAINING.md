@@ -1,17 +1,26 @@
 # Training on the ARNES SLURM cluster
 
-Plan for training the Neural CA "properly" on `ssh arnes`.
+How to train the Neural CA on `ssh arnes` (H100 / MIG): environment, sweep
+scripts, and the gotchas that cost time to find.
 
 ## Cluster facts
 
-- Login node `hpc-login4.arnes.si`, user `es6878`, AlmaLinux 9.8, Lmod modules.
-- SLURM partitions: `gpu` (4-day limit), `long` (7-day), `all` (2-day).
+- Access is **`ssh arnes`** (user `es6878`). It multiplexes over a TOTP-authenticated
+  session (`ControlMaster` in the user's `~/.ssh/config`); which login node it lands
+  on varies (`hpc-login1/3/4`). **When the master session expires, fresh
+  connections fail** with `Permission denied (gssapi-with-mic,keyboard-interactive)`
+  until it is re-established. Don't force a fresh connection (`-o ControlPath=none`)
+  — it cannot authenticate.
+- The cluster has **no GitHub SSH key** — clone over **HTTPS**.
+- SLURM partitions: `gpu` (4-day), `long` (7-day), `all` (2-day), plus
+  **`mig-priority` / `mig-preempt`** (see below).
 - **GPU nodes are mixed:**
   - H100 (Hopper, sm_90): `gwn[01-06]` (2 GPU), `gwn[08-10]` (4 GPU, `sxm`)
   - V100S (Volta, sm_70): `wn[201-212,217-221]` (2 GPU)
+  - MIG slices (H100): `gwn07` — 14 × `gpu:1g.10gb`
 - Driver **580.178.04 / CUDA 13.0**.
-- Login node: 48 cores, 62 GB RAM, **internet works**, `uv 0.11.21` already
-  installed at `~/.local/bin/uv`, Apptainer available, no conda.
+- Login node: 48 cores, 62 GB RAM, **internet works**, `uv 0.11.21` at
+  `~/.local/bin/uv`, Apptainer available, no conda.
 - `$HOME=/d/hpc/home/es6878` on a large `/d` filesystem.
 
 ### Critical gotcha: pin H100
@@ -23,6 +32,23 @@ Volta, so the cu13 torch wheels we get from PyPI **will not run there**.
 
 H100 is sm_90 and matches driver 580 / cu13, so the default PyPI torch build is
 exactly right for it. `slurm/train.sbatch` already pins it.
+
+### MIG slices (when the H100s are busy)
+
+The `gpu` partition is usually fully allocated. `gwn07` exposes **14 H100 MIG
+slices** via `mig-priority` / `mig-preempt` (1-day limit, all accounts allowed):
+
+```bash
+sbatch -p mig-priority --constraint=mig --gres=gpu:1g.10gb:1 \
+       --mem=16G --cpus-per-task=4 slurm/train.sbatch ...
+```
+
+- `gwn07` has **no `h100` feature** — pass `--constraint=mig`, not `h100`.
+- It is still a real H100 (sm_90), so the cu13 torch build works.
+- Measured: **~2.5 it/s** at 72×72 / batch 16 → **~54 min per 8000-iteration run**.
+- The node has 250 GB RAM, so `train.sbatch`'s default `--mem=64G` fits only **3**
+  jobs. `slurm/submit_sweep.sh` overrides `MEM=16G CPUS=4` so all 14 slices run at
+  once (an 18-job sweep then takes ~2 h).
 
 ## Environment
 
@@ -59,7 +85,8 @@ Fallback if we want zero lock divergence: `uv venv --python 3.13` +
 - **Periodic boundaries**: the CA now wraps (circular padding in perception and in
   the living mask), so cells no longer "bounce off" the edges. Controlled by
   `NeuralCA(wrap=True)`; `--no-wrap` reproduces the original zero-padded
-  behaviour. ONNX export carries the same `Concat`/`Slice` wrapping (parity 0.0).
+  behaviour. ONNX export uses a single `Pad(mode="wrap")` (opset 19) — see
+  `AGENTS.md` — with parity ~1e-6.
 - **Resume**: `--resume runs/<name>/state.pt` restores model + optimizer +
   scheduler + RNG + sample pool.
 - **Logging**: `loss.json` plus flushed stdout; `state.pt` and `ckpt_*.pt` are
@@ -74,9 +101,18 @@ Fallback if we want zero lock divergence: `uv venv --python 3.13` +
 
 ## SLURM scripts
 
-- `slurm/train.sbatch` — one H100 job, sources `.venv`, forwards its args to
-  `main.py --device cuda`. Pins `--constraint=h100`.
-- `slurm/submit_sweep.sh` — submits experiments 1–3 for each target.
+- `slurm/train.sbatch` — one job; sources `.venv`, `unset PYTHONPATH PYTHONHOME`,
+  forwards its args to `main.py --device cuda`. Pins `--constraint=h100`.
+- `slurm/submit_sweep.sh` — submits experiments 1–3 for each target, with
+  `PARTITION` / `CONSTRAINT` / `GRES` / `TIME` / `MEM` / `CPUS` overrides:
+
+  ```bash
+  bash slurm/submit_sweep.sh                       # gpu partition (H100)
+  PARTITION=mig-priority CONSTRAINT=mig GRES=gpu:1g.10gb:1 TIME=02:00:00 \
+    MEM=16G CPUS=4 bash slurm/submit_sweep.sh      # all MIG slices
+  ```
+
+  Targets use **codepoint** specs (`emoji:1f980`) so ssh/locale can't mangle emoji.
 
 New emoji set (distinct from the paper's):
 
@@ -103,8 +139,9 @@ bash slurm/submit_sweep.sh crab         # just one target
 | lr | 2e-3, milestone 2000 | paper |
 | checkpoint-every | 250 | cheap, safe |
 
-Expect roughly tens of minutes per model (the CA is tiny; the Python unroll
-dominates), so a full sweep of 18 models is an afternoon.
+Measured: **~54 min per model on a MIG slice** (~2.5 it/s), faster on a full H100.
+An 18-model sweep is ~2 h on the 14 MIG slices. Each run's `state.pt` is ~340 MB,
+so 18 runs ≈ 6 GB (fine on `/d`).
 
 ## Transfer (git)
 
@@ -126,16 +163,19 @@ cd ~/nca && uv sync --no-sources --python 3.13 --group dev
    --pty bash` then a 100-iteration run to confirm H100 + cu13 torch.
 3. `bash slurm/submit_sweep.sh`.
 4. Monitor: `squeue -u $USER`, `tail -f logs/*.out`, `sacct -j <id>`.
-5. Export ONNX on the login node (`uv run python -m nca.export ...`).
-6. rsync `exports/` back, commit, open the frontend.
+5. Export ONNX. Either on the login node (`uv run python -m nca.export ...`, same
+   `unset PYTHONPATH` caveat) or pull the small `ckpt_final.pt` + `target.npy`
+   back with rsync and export locally (the exporter needs the `dev` group).
+6. Commit `exports/`, open the frontend.
 
 ## Milestones
 
 1. **T1** — env on cluster + H100 smoke test (imports, 100 iters). ✅ done
    (validated on an H100 MIG slice: `torch 2.14.1+cu130`, CUDA ok, loss drops)
-2. **T2** — one high-quality run (crab, regenerating) + ONNX export.
-3. **T3** — sweep experiments 1–3 across the 6 targets.
-4. **T4** — compare/curate models, ship to the frontend.
+2. **T2** — one high-quality run (crab, regenerating) + ONNX export. ✅ done
+3. **T3** — sweep experiments 1–3 across the 6 targets. 🚧 14/18 exported;
+   `mushroom_{growing,persistent,regenerating}` + `turtle_regenerating` remain.
+4. **T4** — compare/curate models, ship to the frontend. 🚧 20 models in `exports/`.
 
 ## Open questions
 
