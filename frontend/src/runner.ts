@@ -82,8 +82,25 @@ export class CaRunner {
     ep: 'webgpu' | 'wasm' = 'webgpu',
     seed = 1,
   ): Promise<CaRunner> {
+    // `?wgtune=1` turns off ONNX-side validation and enables buffer caching for
+    // non-storage buffers (both off by default for WebGPU).
+    const wgtune = new URLSearchParams(location.search).has('wgtune');
+    const providers: ort.InferenceSession.ExecutionProviderConfig[] =
+      ep === 'wasm'
+        ? ['wasm']
+        : wgtune
+          ? [
+              {
+                name: 'webgpu',
+                validationMode: 'disabled',
+                defaultBufferCacheMode: 'bucket',
+                queryResolveBufferCacheMode: 'bucket',
+              },
+            ]
+          : ['webgpu'];
+
     const session = await ort.InferenceSession.create(`/models/${model.path}`, {
-      executionProviders: ep === 'wasm' ? ['wasm'] : ['webgpu'],
+      executionProviders: providers,
     });
     const runner = new CaRunner(session, model.meta, seed);
     if (ep === 'webgpu') await runner.setupGpu();
