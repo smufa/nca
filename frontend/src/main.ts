@@ -44,8 +44,8 @@ const viewSizeVal = el<HTMLElement>('viewSizeVal');
 interface View {
   root: HTMLDivElement;
   canvas: HTMLCanvasElement;
-  ctx: CanvasRenderingContext2D;
-  image: ImageData;
+  ctx2d: CanvasRenderingContext2D | null;
+  image: ImageData | null;
   mapping: ChannelMapping;
   selects: Record<'r' | 'g' | 'b' | 'a' | 'bg', HTMLSelectElement>;
 }
@@ -174,8 +174,13 @@ function fillChannelSelect(
 
 function drawView(view: View): void {
   if (!runner) return;
+  if (runner.renderTo) {
+    runner.renderTo(view.canvas, view.mapping);
+    return;
+  }
+  if (!view.ctx2d || !view.image) return;
   mapChannels(runner.x, runner.grid, runner.grid, view.mapping, view.image.data);
-  view.ctx.putImageData(view.image, 0, 0);
+  view.ctx2d.putImageData(view.image, 0, 0);
 }
 
 function drawAll(): void {
@@ -187,7 +192,7 @@ function resizeViews(grid: number): void {
   for (const view of views) {
     view.canvas.width = grid;
     view.canvas.height = grid;
-    view.image = view.ctx.createImageData(grid, grid);
+    if (view.ctx2d) view.image = view.ctx2d.createImageData(grid, grid);
   }
 }
 
@@ -202,11 +207,19 @@ function brushTargets(view: View): number[] {
 /** Apply the active tool to a disc of `brushRadius` cells centred on (cx, cy). */
 function paintDot(view: View, cx: number, cy: number): void {
   if (!runner || tool === 'none') return;
-  const grid = runner.grid;
-  const plane = grid * grid;
   const targets = brushTargets(view);
   if (targets.length === 0) return;
+  const op = tool;
+  const factor = brushFactor;
 
+  // GPU engines apply the stroke in a compute pass - no state upload.
+  if (runner.brush) {
+    runner.brush(op, cx, cy, brushRadius, factor, targets);
+    return;
+  }
+
+  const grid = runner.grid;
+  const plane = grid * grid;
   const r2 = brushRadius * brushRadius;
   const y0 = Math.max(0, cy - brushRadius);
   const y1 = Math.min(grid - 1, cy + brushRadius);
@@ -225,8 +238,6 @@ function paintDot(view: View, cx: number, cy: number): void {
   }
   if (indices.length === 0) return;
 
-  const op = tool;
-  const factor = brushFactor;
   runner.edit((x) => {
     for (const idx of indices) {
       if (op === 'one') x[idx] = 1;
@@ -407,8 +418,14 @@ function createView(mapping: ChannelMapping): View {
   const canvas = document.createElement('canvas');
   canvas.width = grid;
   canvas.height = grid;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('2d canvas context unavailable');
+  const onGpu = !!runner.renderTo;
+  let ctx2d: CanvasRenderingContext2D | null = null;
+  let image: ImageData | null = null;
+  if (!onGpu) {
+    ctx2d = canvas.getContext('2d');
+    if (!ctx2d) throw new Error('2d canvas context unavailable');
+    image = ctx2d.createImageData(grid, grid);
+  }
 
   root.appendChild(head);
   root.appendChild(canvas);
@@ -423,8 +440,8 @@ function createView(mapping: ChannelMapping): View {
   const view: View = {
     root,
     canvas,
-    ctx,
-    image: ctx.createImageData(grid, grid),
+    ctx2d,
+    image,
     mapping,
     selects: { r: rSel, g: gSel, b: bSel, a: aSel, bg: bgSel },
   };
@@ -682,7 +699,7 @@ stepBtn.addEventListener('click', async () => {
   setBusy(true);
   try {
     await runner.step();
-    await runner.sync();
+    if (!runner.renderTo) await runner.sync();
   } catch (e) {
     console.error(e);
     setStatus(`step failed: ${(e as Error).message}`, 'err');
@@ -770,7 +787,7 @@ async function frame(t: number): Promise<void> {
       await runner.step();
       done++;
     }
-    await runner.sync();
+    if (!runner.renderTo) await runner.sync();
   } catch (e) {
     console.error(e);
     setStatus(`step failed: ${(e as Error).message}`, 'err');

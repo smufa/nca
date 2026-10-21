@@ -14,7 +14,8 @@
 import type { ManifestModel } from './models';
 import { CANONICAL_KERNELS, mulberry32, seedState } from './nca';
 import type { Rng } from './nca';
-import type { CaEngine, Perf } from './engine';
+import type { BrushOp, CaEngine, Perf } from './engine';
+import type { ChannelMapping } from './nca';
 
 const WG = 8;
 
@@ -118,6 +119,74 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 const STORAGE = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
 
+const DRAW_WGSL = /* wgsl */ `
+struct DrawParams {
+  H: u32, W: u32,
+  r: i32, g: i32, b: i32, a: i32,
+  bg: f32, pad: f32,
+};
+@group(0) @binding(0) var<storage, read> state: array<f32>;
+@group(0) @binding(1) var<uniform> dp: DrawParams;
+
+@vertex
+fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
+  var p = array<vec2<f32>, 3>(
+    vec2<f32>(-1.0, -1.0), vec2<f32>(3.0, -1.0), vec2<f32>(-1.0, 3.0));
+  return vec4<f32>(p[vi], 0.0, 1.0);
+}
+
+@fragment
+fn fs(@builtin(position) fc: vec4<f32>) -> @location(0) vec4<f32> {
+  let x = u32(fc.x);
+  let y = u32(fc.y);
+  if (x >= dp.W || y >= dp.H) { discard; }
+  let plane = dp.H * dp.W;
+  let i = y * dp.W + x;
+  var alpha = 1.0;
+  if (dp.a >= 0) { alpha = clamp(state[u32(dp.a) * plane + i], 0.0, 1.0); }
+  let inv = (1.0 - alpha) * dp.bg;
+  return vec4<f32>(
+    clamp(state[u32(dp.r) * plane + i] + inv, 0.0, 1.0),
+    clamp(state[u32(dp.g) * plane + i] + inv, 0.0, 1.0),
+    clamp(state[u32(dp.b) * plane + i] + inv, 0.0, 1.0),
+    1.0);
+}
+`;
+
+const BRUSH_WGSL = /* wgsl */ `
+struct Brush {
+  H: u32, W: u32,
+  cx: i32, cy: i32, radius: i32, op: u32,
+  factor: f32, mask: u32,
+  pad0: u32, pad1: u32,
+};
+@group(0) @binding(0) var<storage, read_write> state: array<f32>;
+@group(0) @binding(1) var<uniform> b: Brush;
+
+@compute @workgroup_size(${WG}, ${WG}, 1)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x >= b.W || gid.y >= b.H) { return; }
+  let dx = i32(gid.x) - b.cx;
+  let dy = i32(gid.y) - b.cy;
+  if (dx * dx + dy * dy > b.radius * b.radius) { return; }
+  let i = gid.y * b.W + gid.x;
+  let plane = b.H * b.W;
+  for (var c: u32 = 0u; c < 16u; c = c + 1u) {
+    if ((b.mask & (1u << c)) == 0u) { continue; }
+    let idx = c * plane + i;
+    if (b.op == 0u) { state[idx] = 1.0; }
+    else if (b.op == 1u) { state[idx] = 0.0; }
+    else { state[idx] = state[idx] * b.factor; }
+  }
+}
+`;
+
+interface GpuViewRes {
+  context: GPUCanvasContext;
+  uniform: GPUBuffer;
+  bindGroups: [GPUBindGroup, GPUBindGroup];
+}
+
 export class ShaderRunner implements CaEngine {
   readonly meta: ManifestModel['meta'];
   readonly channelN: number;
@@ -144,6 +213,11 @@ export class ShaderRunner implements CaEngine {
 
   private pipeline1!: GPUComputePipeline;
   private pipeline2!: GPUComputePipeline;
+  private brushPipeline!: GPUComputePipeline;
+  private brushUniform!: GPUBuffer;
+  private brushBindGroups!: [GPUBindGroup, GPUBindGroup];
+  private drawPipeline!: GPURenderPipeline;
+  private gpuViews = new Map<HTMLCanvasElement, GpuViewRes>();
   private bg1!: [GPUBindGroup, GPUBindGroup];
   private bg2!: [GPUBindGroup, GPUBindGroup];
 
@@ -228,6 +302,24 @@ export class ShaderRunner implements CaEngine {
       size: 48,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
+
+    this.brushPipeline = d.createComputePipeline({
+      layout: 'auto',
+      compute: { module: d.createShaderModule({ code: BRUSH_WGSL }), entryPoint: 'main' },
+    });
+    this.brushUniform = d.createBuffer({
+      size: 48,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    const drawModule = d.createShaderModule({ code: DRAW_WGSL });
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    this.drawPipeline = d.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module: drawModule, entryPoint: 'vs' },
+      fragment: { module: drawModule, entryPoint: 'fs', targets: [{ format }] },
+      primitive: { topology: 'triangle-list' },
+    });
+
     this.allocGrid();
     this.writeKernel();
   }
@@ -282,6 +374,18 @@ export class ShaderRunner implements CaEngine {
     // index 0: cur = A, 1: cur = B
     this.bg1 = [bg1(this.stateA), bg1(this.stateB)];
     this.bg2 = [bg2(this.stateA, this.stateB), bg2(this.stateB, this.stateA)];
+
+    const bl = this.brushPipeline.getBindGroupLayout(0);
+    const bgBrush = (state: GPUBuffer): GPUBindGroup =>
+      d.createBindGroup({
+        layout: bl,
+        entries: [
+          { binding: 0, resource: { buffer: state } },
+          { binding: 1, resource: { buffer: this.brushUniform } },
+        ],
+      });
+    this.brushBindGroups = [bgBrush(this.stateA), bgBrush(this.stateB)];
+    this.gpuViews.clear(); // cached draw bind groups reference the old buffers
 
     this.writeParams();
     this.cur = 0;
@@ -408,6 +512,95 @@ export class ShaderRunner implements CaEngine {
   setKernels(ident: number[], dx: number[], dy: number[]): void {
     this.kernels = [ident.slice(), dx.slice(), dy.slice()];
     this.writeKernel();
+  }
+
+  /** Render the current GPU state straight to a canvas (no download). */
+  renderTo(canvas: HTMLCanvasElement, mapping: ChannelMapping): void {
+    const d = this.device;
+    let gv = this.gpuViews.get(canvas);
+    if (!gv) {
+      const context = canvas.getContext('webgpu') as GPUCanvasContext | null;
+      if (!context) throw new Error('no WebGPU canvas context');
+      const format = navigator.gpu.getPreferredCanvasFormat();
+      context.configure({ device: d, format, alphaMode: 'opaque' });
+      const uniform = d.createBuffer({
+        size: 32,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+      const layout = this.drawPipeline.getBindGroupLayout(0);
+      const bg = (state: GPUBuffer): GPUBindGroup =>
+        d.createBindGroup({
+          layout,
+          entries: [
+            { binding: 0, resource: { buffer: state } },
+            { binding: 1, resource: { buffer: uniform } },
+          ],
+        });
+      gv = { context, uniform, bindGroups: [bg(this.stateA), bg(this.stateB)] };
+      this.gpuViews.set(canvas, gv);
+    }
+
+    const buf = new ArrayBuffer(32);
+    const u = new Uint32Array(buf);
+    const s = new Int32Array(buf);
+    u[0] = this.grid;
+    u[1] = this.grid;
+    s[2] = mapping.r;
+    s[3] = mapping.g;
+    s[4] = mapping.b;
+    s[5] = mapping.a;
+    new Float32Array(buf, 24, 1)[0] = mapping.bg;
+    d.queue.writeBuffer(gv.uniform, 0, buf);
+
+    const enc = d.createCommandEncoder();
+    const pass = enc.beginRenderPass({
+      colorAttachments: [
+        {
+          view: gv.context.getCurrentTexture().createView(),
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        },
+      ],
+    });
+    pass.setPipeline(this.drawPipeline);
+    pass.setBindGroup(0, gv.bindGroups[this.cur]);
+    pass.draw(3);
+    pass.end();
+    d.queue.submit([enc.finish()]);
+  }
+
+  /** Apply a brush stroke directly on the GPU state. */
+  brush(
+    op: BrushOp,
+    cx: number,
+    cy: number,
+    radius: number,
+    factor: number,
+    channels: number[],
+  ): void {
+    let mask = 0;
+    for (const c of channels) if (c >= 0 && c < 32) mask |= 1 << c;
+    const buf = new ArrayBuffer(48);
+    const u = new Uint32Array(buf);
+    const s = new Int32Array(buf);
+    u[0] = this.grid;
+    u[1] = this.grid;
+    s[2] = cx;
+    s[3] = cy;
+    s[4] = radius;
+    u[5] = op === 'one' ? 0 : op === 'zero' ? 1 : 2;
+    new Float32Array(buf, 24, 1)[0] = factor;
+    u[7] = mask >>> 0;
+    this.device.queue.writeBuffer(this.brushUniform, 0, buf);
+
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(this.brushPipeline);
+    pass.setBindGroup(0, this.brushBindGroups[this.cur]);
+    pass.dispatchWorkgroups(Math.ceil(this.grid / WG), Math.ceil(this.grid / WG));
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
   }
 
   async dispose(): Promise<void> {
