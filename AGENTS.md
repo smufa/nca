@@ -85,6 +85,9 @@ uv run python -m nca.sample --checkpoint runs/.../ckpt_final.pt --steps 300
 
 cd frontend && npm install && npm run dev     # http://localhost:5173
 npm run build                                 # tsc + vite build
+
+bash scripts/verify.sh                        # compile + build + parity, one shot
+bash scripts/bench.sh crab_regenerating --reference   # headless GPU correctness/perf
 ```
 
 Frontend URL params: `?ep=wasm|webgpu|shader`, `?log=1` (ORT logs).
@@ -137,8 +140,9 @@ Findings so far (Intel UHD 620):
 - **`torch.onnx.export(dynamic_shapes=...)`** takes **positional / forward arg
   names**, not ONNX input names.
 - **`ort.env.webgpu.device` is a promise.**
-- Do **not** use the `?wgtune` WebGPU provider options — they abort with OOM in
-  the current ORT-Web build.
+- The WebGPU EP provider options (`validationMode`, buffer cache modes) were
+  tried and **removed** — they abort with `InternalError: out of memory` in the
+  current ORT-Web build. Don't reintroduce them.
 - `frontend`'s Vite `publicDir` is `../exports`, which Vite ignores for a dir
   outside the root; a small plugin in `vite.config.ts` serves `/models` instead.
 - The brush edits via `CaEngine.brush` (shader) or `edit` (ORT), which queues
