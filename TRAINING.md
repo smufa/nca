@@ -63,8 +63,9 @@ uv sync --no-sources --python 3.13 --group dev
 ```
 
 - `--no-sources` ignores the local CPU torch pin → PyPI `torch==2.14.1` + cu13.
-- This rewrites the **cluster's** `uv.lock`; keep it there and never sync it back
-  to the laptop (the laptop lock stays CPU-pinned).
+- This rewrites the **cluster's** `uv.lock`, so it diverges from the laptop's. Keep
+  it there, never sync it back, and reset it before pulling:
+  `git checkout -- uv.lock && git pull`.
 - Run it once on the login node; the `.venv` is on `/d` and shared with compute
   nodes.
 
