@@ -149,6 +149,27 @@ Measured: **~54 min per model on a MIG slice** (~2.5 it/s), faster on a full H10
 An 18-model sweep is ~2 h on the 14 MIG slices. `state.pt` is ~120 KB - the pool
 is only written with `--save-pool` - so complete runs are cheap to keep.
 
+## Never use `uv run` on the cluster
+
+`[tool.uv.sources]` in `pyproject.toml` pins torch to the **CPU** index
+(`download.pytorch.org/whl/cpu`), and `uv.lock` bakes that in. A bare
+`uv run` / `uv sync` therefore **replaces the cluster's CUDA torch with a CPU
+wheel** — training still "works" but silently runs on the CPU. (This is easy to
+miss: `torch.cuda.is_available()` just returns False and autocast disables itself.)
+
+Always activate the venv directly, as the sbatch scripts do:
+
+```bash
+source .venv/bin/activate && unset PYTHONPATH PYTHONHOME && python main.py --device cuda ...
+```
+
+To repair an already-clobbered env:
+
+```bash
+uv sync --no-sources --python 3.13 --group dev   # --no-sources -> real PyPI -> cu130 wheel
+python -c "import torch; print(torch.version.cuda)"   # must not be None
+```
+
 ## Transfer (git)
 
 Remote: `https://github.com/smufa/nca.git` (branch `master`).
