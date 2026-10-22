@@ -28,6 +28,8 @@ class TrainConfig:
     pool_size: int = 1024
     use_pool: bool = True
     damage_n: int = 3
+    noise_n: int = 0
+    noise_std: float = 0.0
     train_steps_min: int = 64
     train_steps_max: int = 96
     lr: float = 2e-3
@@ -199,6 +201,12 @@ def train(
     damage_n = min(cfg.damage_n, max(cfg.batch_size - 1, 0))
     if damage_n != cfg.damage_n:
         print(f"note: clamping damage_n {cfg.damage_n} -> {damage_n} (batch_size={cfg.batch_size})")
+    # Noise goes on the slots just before the damaged ones (the seed stays clean).
+    noise_n = min(cfg.noise_n, max(cfg.batch_size - 1 - damage_n, 0))
+    if noise_n != cfg.noise_n:
+        print(f"note: clamping noise_n {cfg.noise_n} -> {noise_n} (batch_size={cfg.batch_size})")
+    if noise_n and cfg.noise_std <= 0:
+        print("note: noise_n > 0 but noise_std is 0; no noise will be applied")
 
     losses: list[float] = []
     start_step = 0
@@ -229,7 +237,8 @@ def train(
 
     print(
         f"Training on {device} | grid {h}x{w} | {ca.num_parameters} params | "
-        f"pool={cfg.use_pool} damage={cfg.damage_n} | {cfg.iterations} iters"
+        f"pool={cfg.use_pool} damage={damage_n} noise={noise_n}x{cfg.noise_std} "
+        f"| {cfg.iterations} iters"
     )
 
     # Loss values stay as device scalars and are only turned into floats when a
@@ -254,6 +263,17 @@ def train(
             if damage_n:
                 dmg = make_circle_masks(damage_n, h, w, generator).to(device)
                 x0[-damage_n:] *= (1.0 - dmg).unsqueeze(1)
+            if noise_n and cfg.noise_std > 0:
+                # Gaussian state corruption on every channel: the unroll then has to
+                # pull a noisy / partly-destroyed pattern back to the target, which
+                # is the robustness pressure the circle damage does not provide
+                # (it only ever zeroes contiguous blobs).
+                lo = cfg.batch_size - damage_n - noise_n
+                hi = cfg.batch_size - damage_n
+                noise = torch.randn(
+                    (noise_n, x0.shape[1], h, w), device=device, generator=gpu_generator
+                ) * cfg.noise_std
+                x0[lo:hi] = x0[lo:hi] + noise
         else:
             x0 = seed.unsqueeze(0).repeat(cfg.batch_size, 1, 1, 1).contiguous()
 

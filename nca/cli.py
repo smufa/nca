@@ -18,6 +18,9 @@ EXPERIMENTS = {
     "growing": dict(use_pool=False, damage_n=0),
     "persistent": dict(use_pool=True, damage_n=0),
     "regenerating": dict(use_pool=True, damage_n=3),
+    # regenerating + Gaussian state noise: the unroll must reconstruct the target
+    # from a corrupted state, not just from a clean one with holes punched in it.
+    "noisy": dict(use_pool=True, damage_n=3, noise_n=4, noise_std=0.2),
 }
 
 
@@ -52,6 +55,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-pool", action="store_true", help="disable the sample pool")
     p.add_argument(
         "--damage-n", type=int, default=None, help="patterns to damage per batch"
+    )
+    p.add_argument(
+        "--noise-n",
+        type=int,
+        default=None,
+        help="pool samples per batch to corrupt with Gaussian state noise",
+    )
+    p.add_argument(
+        "--noise-std",
+        type=float,
+        default=None,
+        help="std of the additive state noise (0 = off; try 0.1-0.3)",
     )
     p.add_argument("--pool-size", type=int, default=1024)
     p.add_argument(
@@ -147,6 +162,8 @@ def main(argv: list[str] | None = None) -> None:
     preset = EXPERIMENTS[args.experiment]
     use_pool = preset["use_pool"] and not args.no_pool
     damage_n = preset["damage_n"] if args.damage_n is None else args.damage_n
+    noise_n = preset.get("noise_n", 0) if args.noise_n is None else args.noise_n
+    noise_std = preset.get("noise_std", 0.0) if args.noise_std is None else args.noise_std
     if not args.lr_milestone:
         args.lr_milestone = [max(1, int(0.25 * args.iterations))]
 
@@ -180,6 +197,8 @@ def main(argv: list[str] | None = None) -> None:
         pool_size=args.pool_size,
         use_pool=use_pool,
         damage_n=damage_n,
+        noise_n=noise_n,
+        noise_std=noise_std,
         train_steps_min=args.train_steps[0],
         train_steps_max=args.train_steps[1],
         lr=args.lr,
