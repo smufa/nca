@@ -151,6 +151,12 @@ Findings so far (Intel UHD 620):
   the whole unroll sequence is *slower* (large warmup, specialised per step count).
 - The unroll is compute/backward-bound on that small slice, not Python-bound, so
   further speed-ups would come from a larger batch (better utilisation) or bf16.
+- **Unroll memory is ~linear in `batch_size x train_steps`** (~6 GB at 16x80,
+  72²), because autograd keeps every step's activations. Batch 16 is near the
+  ceiling on a `1g.10gb` MIG slice.
+- Training draws the whole unroll's fire mask up front (`torch.rand([n,B,1,H,W])`)
+  instead of one `rand_like` per step, and keeps losses as device scalars until a
+  log/checkpoint needs the number (no per-step `.item()` sync).
 
 ## Model capacity (crab / regenerating, 8k iters)
 

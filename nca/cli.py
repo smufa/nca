@@ -54,7 +54,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--damage-n", type=int, default=None, help="patterns to damage per batch"
     )
     p.add_argument("--pool-size", type=int, default=1024)
-    p.add_argument("--batch-size", type=int, default=4)
+    p.add_argument(
+        "--batch-size",
+        type=int,
+        default=16,
+        help="patterns per step; GPU memory scales with batch_size x --train-steps",
+    )
 
     p.add_argument("--channels", type=int, default=16, help="number of state channels")
     p.add_argument("--hidden", type=int, default=128, help="update-rule hidden width")
@@ -112,6 +117,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--log-every", type=int, default=10)
     p.add_argument("--ckpt-every", type=int, default=100)
+    p.add_argument(
+        "--progress-every",
+        type=int,
+        default=100,
+        help="render a batch montage every N iterations (0 = never)",
+    )
+    p.add_argument(
+        "--save-pool",
+        action="store_true",
+        help="include the large sample pool in state.pt (exact resume; ~340 MB/ckpt)",
+    )
     p.add_argument("--no-gif", action="store_true")
     p.add_argument("--gif-steps", type=int, default=120)
     return p
@@ -167,6 +183,8 @@ def main(argv: list[str] | None = None) -> None:
         normalize_grads=not args.no_grad_norm,
         log_every=args.log_every,
         ckpt_every=args.ckpt_every,
+        progress_every=args.progress_every,
+        save_pool=args.save_pool,
         make_gif=not args.no_gif,
         gif_steps=args.gif_steps,
         seed=args.seed,

@@ -131,16 +131,25 @@ class NeuralCA(nn.Module):
         fire_rate: float | None = None,
         angle: float = 0.0,
         step_size: float = 1.0,
+        update_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
+        """One CA step.
+
+        ``update_mask`` (``[B, 1, H, W]``) lets a caller supply the stochastic
+        fire mask instead of drawing one here. Training pre-draws a whole batch
+        of masks for the unroll, which removes one RNG kernel + one comparison
+        per step and makes the step a pure function of its inputs.
+        """
         pre_life_mask = get_living_mask(x, self.wrap)
 
         y = self.perceive(x, angle)
         dx = self.update(y) * step_size
 
-        if fire_rate is None:
-            fire_rate = self.fire_rate
-        # Asynchronous update: each cell updates with probability fire_rate.
-        update_mask = torch.rand_like(x[:, :1]) <= fire_rate
+        if update_mask is None:
+            if fire_rate is None:
+                fire_rate = self.fire_rate
+            # Asynchronous update: each cell updates with probability fire_rate.
+            update_mask = torch.rand_like(x[:, :1]) <= fire_rate
         x = x + dx * update_mask
 
         post_life_mask = get_living_mask(x, self.wrap)

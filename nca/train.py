@@ -36,6 +36,8 @@ class TrainConfig:
     normalize_grads: bool = True
     log_every: int = 10
     ckpt_every: int = 100
+    progress_every: int = 100  # render a batch montage every N iterations
+    save_pool: bool = False  # include the (large) sample pool in state.pt
     gif_steps: int = 120
     gif_frame_every: int = 2
     gif_scale: int = 3
@@ -75,26 +77,28 @@ def _train_step(
     x0: torch.Tensor,
     target: torch.Tensor,
     cfg: TrainConfig,
-    generator: torch.Generator,
-) -> tuple[torch.Tensor, float]:
-    n = int(
-        torch.randint(cfg.train_steps_min, cfg.train_steps_max, (1,), generator=generator)
-    )
-    x = x0
+    masks: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """One optimiser step over the unroll. Returns ``(final_state, loss)``.
+
+    ``loss`` is detached but **left on the device**: the caller materialises the
+    number only when it actually needs it, so we don't force a sync every step.
+    """
     with torch.autocast(
         device_type="cuda", dtype=torch.bfloat16, enabled=cfg.amp == "bf16"
     ):
-        x = forward(x, n)
+        x = forward(x0, masks)
     loss = loss_fn(x, target)  # fp32, so the reported loss stays comparable
 
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
     if cfg.normalize_grads:
-        for p in ca.parameters():
-            if p.grad is not None:
-                p.grad /= p.grad.norm() + 1e-8
+        grads = [p.grad for p in ca.parameters() if p.grad is not None]
+        if grads:
+            norms = torch._foreach_norm(grads)
+            torch._foreach_div_(grads, [n + 1e-8 for n in norms])
     optimizer.step()
-    return x.detach(), float(loss.item())
+    return x.detach(), loss.detach()
 
 
 def _save_resume_state(
@@ -103,10 +107,12 @@ def _save_resume_state(
     optimizer: torch.optim.Optimizer,
     scheduler: torch.optim.lr_scheduler.LRScheduler,
     generator: torch.Generator,
+    gpu_generator: torch.Generator,
     device: torch.device,
     step: int,
     losses: list[float],
     pool: SamplePool | None,
+    save_pool: bool = False,
 ) -> None:
     state = {
         "model": ca.state_dict(),
@@ -114,11 +120,18 @@ def _save_resume_state(
         "scheduler": scheduler.state_dict(),
         "step": step,
         "losses": losses,
-        "rng": {"cpu": torch.get_rng_state(), "gen": generator.get_state()},
+        "rng": {
+            "cpu": torch.get_rng_state(),
+            "gen": generator.get_state(),
+            "gen_gpu": gpu_generator.get_state(),
+        },
     }
     if device.type == "cuda":
         state["rng"]["cuda"] = torch.cuda.get_rng_state_all()
-    if pool is not None:
+    # The pool is [pool_size, C, H, W] (~340 MB at 1024x16x72x72). It is the whole
+    # point of state.pt being large, and resuming without it is fine: the pool
+    # simply restarts from the seed. Only keep it on request.
+    if save_pool and pool is not None:
         state["pool"] = pool.x
     torch.save(state, path)
 
@@ -140,6 +153,10 @@ def train(
     np.random.seed(cfg.seed)
     torch.manual_seed(cfg.seed)
     generator = torch.Generator(device="cpu").manual_seed(cfg.seed)
+    # Separate generator for the on-device fire masks (drawn a whole unroll at a
+    # time). Falls back to CPU behaviour on a CPU device.
+    gpu_generator = torch.Generator(device=device.type)
+    gpu_generator.manual_seed(cfg.seed)
 
     if device.type == "cuda":
         torch.backends.cudnn.benchmark = True
@@ -149,21 +166,21 @@ def train(
 
     # The unroll is ~80 sequential steps, so the per-call dispatch overhead
     # dominates. Compiling the *whole sequence* (not just the module) turns it
-    # into one graph. n is specialised per value, so pair this with a fixed
-    # --train-steps range.
+    # into one graph. The loop bound comes from the mask tensor, so this is
+    # specialised per unroll length.
     if cfg.compile:
 
         @torch.compile(dynamic=False)
-        def forward(x: torch.Tensor, n: int) -> torch.Tensor:
-            for _ in range(n):
-                x = ca(x)
+        def forward(x: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
+            for k in range(masks.shape[0]):
+                x = ca(x, update_mask=masks[k])
             return x
 
     else:
 
-        def forward(x: torch.Tensor, n: int) -> torch.Tensor:
-            for _ in range(n):
-                x = ca(x)
+        def forward(x: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
+            for k in range(masks.shape[0]):
+                x = ca(x, update_mask=masks[k])
             return x
     target = target.to(device)
     seed = seed.to(device)
@@ -197,10 +214,15 @@ def train(
             torch.set_rng_state(rng["cpu"])
         if "gen" in rng:
             generator.set_state(rng["gen"])
+        if "gen_gpu" in rng:
+            gpu_generator.set_state(rng["gen_gpu"])
         if device.type == "cuda" and "cuda" in rng:
             torch.cuda.set_rng_state_all(rng["cuda"])
-        if pool is not None and "pool" in state:
-            pool.x = state["pool"].to(device)
+        if pool is not None:
+            if "pool" in state:
+                pool.x = state["pool"].to(device)
+            else:
+                print("note: no pool in resume state; restarting the pool from the seed")
         print(f"resumed from {resume} at step {start_step}")
 
     start = time.time()
@@ -209,6 +231,15 @@ def train(
         f"Training on {device} | grid {h}x{w} | {ca.num_parameters} params | "
         f"pool={cfg.use_pool} damage={cfg.damage_n} | {cfg.iterations} iters"
     )
+
+    # Loss values stay as device scalars and are only turned into floats when a
+    # log line / checkpoint actually needs them (no per-step sync).
+    pending: list[torch.Tensor] = []
+
+    def flush_losses() -> None:
+        if pending:
+            losses.extend(torch.stack(pending).tolist())
+            pending.clear()
 
     for step in range(start_step, cfg.iterations):
         if pool is not None:
@@ -221,20 +252,32 @@ def train(
             # to grow from scratch.
             x0[0] = seed
             if damage_n:
-                masks = make_circle_masks(damage_n, h, w, generator).to(device)
-                x0[-damage_n:] *= (1.0 - masks).unsqueeze(1)
+                dmg = make_circle_masks(damage_n, h, w, generator).to(device)
+                x0[-damage_n:] *= (1.0 - dmg).unsqueeze(1)
         else:
             x0 = seed.unsqueeze(0).repeat(cfg.batch_size, 1, 1, 1).contiguous()
 
-        x, loss = _train_step(ca, forward, optimizer, x0, target, cfg, generator)
+        n = int(
+            torch.randint(cfg.train_steps_min, cfg.train_steps_max, (1,), generator=generator)
+        )
+        # Draw the whole unroll's fire mask in one shot: one RNG kernel instead
+        # of n, and the step becomes deterministic given its inputs.
+        masks = (
+            torch.rand((n, cfg.batch_size, 1, h, w), device=device, generator=gpu_generator)
+            <= ca.fire_rate
+        )
+
+        x, loss_t = _train_step(ca, forward, optimizer, x0, target, cfg, masks)
         scheduler.step()
 
         if pool is not None:
             pool.commit(idx, x)
 
-        losses.append(loss)
+        pending.append(loss_t)
 
         if step % cfg.log_every == 0 or step == cfg.iterations - 1:
+            flush_losses()
+            loss = losses[-1]
             elapsed = time.time() - start
             done = step + 1 - start_step
             rate = done / elapsed if elapsed > 0 else 0.0
@@ -245,23 +288,27 @@ def train(
                 f"| {rate:.2f} it/s | eta {eta / 60:.1f} min",
                 flush=True,
             )
+
+        if cfg.progress_every and step % cfg.progress_every == 0:
             before = render(x0)
             after = render(x)
             montage = np.vstack([tile(before, ncols=cfg.batch_size), tile(after, ncols=cfg.batch_size)])
             save_image(montage, out_dir / "progress" / f"batch_{step:06d}.png")
 
         if cfg.ckpt_every and (step + 1) % cfg.ckpt_every == 0:
+            flush_losses()
             torch.save(ca.state_dict(), out_dir / f"ckpt_{step + 1:06d}.pt")
             _save_resume_state(
                 out_dir / "state.pt", ca, optimizer, scheduler, generator,
-                device, step + 1, losses, pool,
+                gpu_generator, device, step + 1, losses, pool, cfg.save_pool,
             )
             (out_dir / "loss.json").write_text(json.dumps(losses))
 
     torch.save(ca.state_dict(), out_dir / "ckpt_final.pt")
+    flush_losses()
     _save_resume_state(
         out_dir / "state.pt", ca, optimizer, scheduler, generator,
-        device, cfg.iterations, losses, pool,
+        gpu_generator, device, cfg.iterations, losses, pool, cfg.save_pool,
     )
     (out_dir / "loss.json").write_text(json.dumps(losses))
     plot_loss(losses, out_dir / "loss.png")

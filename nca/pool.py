@@ -24,7 +24,8 @@ class SamplePool:
         # randperm uses the (CPU) generator for reproducibility, then the indices
         # are moved to the pool's device (the pool may live on CUDA).
         idx = torch.randperm(len(self.x), generator=generator)[:n].to(self.x.device)
-        return idx, self.x[idx].clone()
+        # Advanced indexing already copies, so no .clone() here.
+        return idx, self.x[idx]
 
     def commit(self, idx: torch.Tensor, x: torch.Tensor) -> None:
         """Write ``x`` back to the slots at ``idx``."""

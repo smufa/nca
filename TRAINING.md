@@ -89,16 +89,21 @@ Fallback if we want zero lock divergence: `uv venv --python 3.13` +
   behaviour. ONNX export uses a single `Pad(mode="wrap")` (opset 19) — see
   `AGENTS.md` — with parity ~1e-6.
 - **Resume**: `--resume runs/<name>/state.pt` restores model + optimizer +
-  scheduler + RNG + sample pool.
+  scheduler + RNG. The **sample pool is *not* stored** by default - it is the only
+  large thing in the state (~340 MB), and resuming without it just restarts the
+  pool from the seed. Pass `--save-pool` if you need a bit-exact resume.
 - **Logging**: `loss.json` plus flushed stdout; `state.pt` and `ckpt_*.pt` are
   written every `--ckpt-every` steps. **All** intermediate checkpoints are kept
-  (they are tiny).
-- **Perf**: `cudnn.benchmark` + TF32 enabled automatically on CUDA.
+  (they are tiny). Batch montages go to `progress/` every `--progress-every`.
+- **Perf**: `cudnn.benchmark` + TF32 enabled automatically on CUDA. `--amp bf16`
+  is worth ~1.3x. `torch.compile` does **not** help (see `AGENTS.md`).
+- **Batch size**: the unroll keeps activations for *every* step, so GPU memory is
+  ~linear in `batch_size x train_steps` (~6 GB at 16x80 on a 72² grid). Batch 16
+  is near the ceiling on a `1g.10gb` MIG slice; use a full GPU, a shorter
+  `--train-steps`, or gradient checkpointing to go higher.
 - **Run naming**: `--run-name` gives a deterministic `runs/<name>/`.
 - Targets are pre-cached in `assets/targets/` (committed), so compute nodes need
   no internet.
-- Still optional/untested: `torch.compile`, AMP. The bottleneck is the Python
-  unroll, so try `--compile` if iteration time is high.
 
 ## SLURM scripts
 
@@ -141,8 +146,8 @@ bash slurm/submit_sweep.sh crab         # just one target
 | checkpoint-every | 250 | cheap, safe |
 
 Measured: **~54 min per model on a MIG slice** (~2.5 it/s), faster on a full H100.
-An 18-model sweep is ~2 h on the 14 MIG slices. Each run's `state.pt` is ~340 MB,
-so 18 runs ≈ 6 GB (fine on `/d`).
+An 18-model sweep is ~2 h on the 14 MIG slices. `state.pt` is ~120 KB - the pool
+is only written with `--save-pool` - so complete runs are cheap to keep.
 
 ## Transfer (git)
 
