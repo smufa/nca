@@ -9,8 +9,9 @@
 # Runs the same regenerating crab as the full-size baseline (hidden 128, 16
 # channels, 8336 params) so the numbers are directly comparable.
 #
-# NOTE: models with channels != 16 or hidden != 128 run on the WASM/WebGPU(ORT)
-# engines; the native `shader` engine currently assumes C=16 and hidden=128.
+# NOTE: the native `shader` engine is size-generic (C in 4..16, hidden % 4 == 0
+# as compile-time overrides), so every model below runs on it; anything outside
+# that range falls back to the WASM engine automatically.
 
 set -euo pipefail
 mkdir -p logs

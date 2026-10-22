@@ -18,4 +18,14 @@ if [[ -n "$LOADER" ]]; then
 fi
 export VK_ICD_FILENAMES="${VK_ICD_FILENAMES:-/run/opengl-driver/share/vulkan/icd.d/intel_icd.x86_64.json}"
 
-exec uv run --with wgpu --with onnxruntime python scripts/shader_bench.py "$@"
+if command -v uv >/dev/null 2>&1; then
+  exec uv run --with wgpu --with onnxruntime python scripts/shader_bench.py "$@"
+fi
+
+# No uv: only usable if the venv already has wgpu (e.g. a long-lived cluster venv).
+if ! ./.venv/bin/python -c "import wgpu" >/dev/null 2>&1; then
+  echo "bench.sh: needs \`uv\` (it pulls wgpu into an ephemeral env) - skipping." >&2
+  echo "          pip install wgpu, or add a \`bench\` dependency group and re-run." >&2
+  exit 3
+fi
+exec ./.venv/bin/python scripts/shader_bench.py "$@"
