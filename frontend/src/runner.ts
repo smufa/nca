@@ -84,14 +84,19 @@ export class CaRunner implements CaEngine {
     return 'onnxruntime-web wasm';
   }
 
-  /** Select which target a conditional model should grow (one-hot of length cond_n). */
+  /**
+   * Select which target a conditional model should grow.
+   *
+   * The state is deliberately left alone: switching the one-hot mid-run should
+   * *convert* whatever is on the grid towards the new target. Use `reset()` to go
+   * back to the seed.
+   */
   setCond(index: number): void {
     if (!this.condN) return;
     const i = Math.max(0, Math.min(this.condN - 1, index | 0));
     const data = new Float32Array(this.condN);
     data[i] = 1;
     this.condTensor = new ort.Tensor('float32', data, [1, this.condN, 1, 1]);
-    this.reset();
   }
 
   /**

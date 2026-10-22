@@ -414,13 +414,18 @@ export class ShaderRunner implements CaEngine {
     return this.kernels.map((k) => k.slice());
   }
 
-  /** Select which target a conditional model should grow. */
+  /**
+   * Select which target a conditional model should grow.
+   *
+   * The state is deliberately left alone: switching the one-hot mid-run should
+   * *convert* whatever is on the grid towards the new target, which is the whole
+   * point of a conditional model. Use `reset()` to go back to the seed.
+   */
   setCond(index: number): void {
     if (!this.condN) return;
     this.cond.fill(0);
     this.cond[Math.max(0, Math.min(this.condN - 1, index | 0))] = 1;
     this.writeCond();
-    this.reset();
   }
 
   private writeCond(): void {

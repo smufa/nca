@@ -784,7 +784,8 @@ modelSelect.addEventListener('change', () => {
 });
 
 condSelect.addEventListener('change', () => {
-  // setCond() resets the state, so don't do it mid-step.
+  // Switching the target keeps the state, so the CA converts in place. Wait for
+  // an in-flight step anyway, so the new one-hot applies cleanly from the next one.
   void whenIdle().then(() => {
     runner?.setCond?.(Number(condSelect.value) || 0);
     drawAll();
