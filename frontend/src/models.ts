@@ -70,6 +70,7 @@ export const GROUP_ORDER = [
   'Crab · capacity',
   'Crab · checkpoints',
   'Crab · experiments',
+  'Multi-target',
   'Demos',
 ];
 
@@ -93,6 +94,20 @@ export function modelGroup(m: ManifestModel): ModelGroup {
       group: 'Crab · checkpoints',
       label: `@${mt[1]}${mt[2] ? ' static' : ''}`,
       order: Number(mt[1]),
+    };
+  }
+  // Conditional multi-target runs: multi2..8 (matched pairs) / cross2..8 (a slice
+  // of each batch is asked to convert one grown target into another).
+  mt = /^multi(\d+)$/.exec(id);
+  if (mt) {
+    return { group: 'Multi-target', label: `${mt[1]} emoji`, order: Number(mt[1]) };
+  }
+  mt = /^cross(\d+)$/.exec(id);
+  if (mt) {
+    return {
+      group: 'Multi-target',
+      label: `${mt[1]} emoji · cross`,
+      order: 100 + Number(mt[1]),
     };
   }
   if (id === 'smile-demo') return { group: 'Demos', label: 'smile', order: 0 };

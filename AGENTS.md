@@ -219,6 +219,38 @@ does not cover the space the kernel lab can reach. Neither is captured by the
 training loss, which is not comparable across regimes — the failure was found by
 playing with the kernel lab, not by a metric.
 
+## Conditional (multi-target) models
+
+`--targets SPEC...` makes one CA reproduce several targets: a `cond_n`-wide one-hot
+is appended to every cell's perception, so `update[0]` takes `3C + cond_n` inputs.
+It is a **separate input, not an extra state channel** - `x = x * life_mask` would
+zero it in every dead cell, and since the exported graph *is* the step, the
+frontend could not re-clamp it. `prepare_targets()` centres each spec in a
+`max_size` canvas so non-square emoji share a grid, and the pool carries a
+per-slot `cond` (a state only means something together with the target it was
+grown towards). Both ONNX (a `[B, cond_n, 1, 1]` input) and the shader
+(`CONDN` + the one-hot appended to `perc`) support it.
+
+`--mismatch-p` breaks the `(state, cond)` pairing for a slice of each batch: an
+already-grown emoji is asked to become a *different* one. Without it every pair is
+self-consistent, so a small MLP could satisfy the task by memorising N attractors
+and treating the one-hot as an index.
+
+Measured (hidden stays 128):
+
+| run | targets | params | min loss |
+|---|---:|---:|---:|
+| `multi2` | 2 | 8592 | 2.4e-3 |
+| `multi4` | 4 | 8848 | 1.9e-3 |
+| `multi6` | 6 | 9104 | 3.4e-3 |
+| `multi8` | 8 | 9360 | 3.9e-3 |
+
+All four grow the *correct* emoji for each one-hot index (verified by rolling each
+index out from the seed) - **no condition collapse even at 8 emoji**. Quality does
+fall with N (visibly blurrier at 8), so one shared MLP is capacity-limited rather
+than conditioning-limited. These losses are ~10x a single-target 2.0e-4 and are not
+comparable across regimes - check the playground, not the number.
+
 ## Gotchas
 
 - **NixOS + Vulkan (for `scripts/shader_bench.py`)**: the loader/ICDs aren't on
