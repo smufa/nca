@@ -142,21 +142,39 @@ Findings so far (Intel UHD 620):
 - The bench's `--reference` reports a **1-step** diff as the correctness gate; the
   N-step diff is larger because the CA is chaotic.
 
-## Training performance (measured on a MIG slice, 72×72 / batch 16)
+## Training performance (measured, 72×72, 80-step unroll)
 
-- The ~80-step unroll dominates; the full-size model trains at **~2.3 it/s**.
-- **`--amp bf16` → ~2.9 it/s (1.3×)** with comparable loss (the reported loss is
-  recomputed in fp32). Use it.
-- **`torch.compile` does not help**: compiling the module is neutral, compiling
-  the whole unroll sequence is *slower* (large warmup, specialised per step count).
-- The unroll is compute/backward-bound on that small slice, not Python-bound, so
-  further speed-ups would come from a larger batch (better utilisation) or bf16.
-- **Unroll memory is ~linear in `batch_size x train_steps`** (~6 GB at 16x80,
-  72²), because autograd keeps every step's activations. Batch 16 is near the
-  ceiling on a `1g.10gb` MIG slice.
+The unroll is **throughput-bound, not latency-bound**: its time is *exactly*
+linear in batch size, so a larger batch buys nothing on MIG (and only ~1.8× on an
+under-utilised H100). Non-unroll code (pool sample/rank/damage, grad norm,
+commit, `.item()`) is ~0.3 ms of a 54 ms (H100) / 429 ms (MIG) iteration.
+
+| batch | MIG fp32 / bf16 | H100 fp32 / bf16 |
+|---:|---|---|
+| 8 | 235 / 150 ms | — |
+| 16 | 429 / 331 ms (2.3 it/s) | 54 / 55 ms (18.6 it/s) |
+| 24 | 642 / 534 ms | — |
+| 32 | — | 85 / 74 ms |
+| 64 | — | 156 / 126 ms |
+| 128 | — | 302 / 244 ms |
+
+Samples/s: MIG 34→37→37 (8→24); H100 298→432→510→525 (16→128). Peak GPU memory
+at batch 16: **5.6 GB fp32 / 3.0 GB bf16**, linear in `batch_size x train_steps`
+(autograd keeps every step's activations), so a `1g.10gb` slice caps out near
+batch 24.
+
+- **A full H100 is ~8× a MIG slice at the same batch and schedule** (8000 iters
+  at batch 16: ~7 min vs ~54 min). Use an H100 for a single run; use the 14 MIG
+  slices for a *sweep*, which parallelises better than one GPU serially.
+- **`--amp bf16`**: ~1.3–1.55× on MIG and halves memory; neutral on H100 at batch
+  16, ~1.2–1.3× at batch ≥ 32.
+- **`torch.compile` does not help** (module: neutral; whole sequence: slower via
+  warmup + per-`n` specialisation). CUDA graphs are untested and only matter if
+  the step were latency-bound, which it is not.
 - Training draws the whole unroll's fire mask up front (`torch.rand([n,B,1,H,W])`)
   instead of one `rand_like` per step, and keeps losses as device scalars until a
-  log/checkpoint needs the number (no per-step `.item()` sync).
+  log/checkpoint needs the number (no per-step `.item()` sync). Regenerate this
+  table with `sbatch slurm/profile.sbatch`.
 
 ## Model capacity (crab / regenerating, 8k iters)
 

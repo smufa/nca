@@ -45,7 +45,13 @@ sbatch -p mig-priority --constraint=mig --gres=gpu:1g.10gb:1 \
 
 - `gwn07` has **no `h100` feature** — pass `--constraint=mig`, not `h100`.
 - It is still a real H100 (sm_90), so the cu13 torch build works.
-- Measured: **~2.5 it/s** at 72×72 / batch 16 → **~54 min per 8000-iteration run**.
+- Measured MIG: **~2.3 it/s** at 72×72 / batch 16 → **~54 min per 8000-iteration
+  run**. The same config on a full H100 is **~18.6 it/s (~7 min)** — the unroll is
+  throughput-bound, so the GPU does matter here (see `AGENTS.md` for the table).
+  `--amp bf16` adds ~1.3–1.55× on MIG and halves memory; use it.
+- Batch size does **not** change throughput on MIG (time is exactly linear in
+  batch) — it only helps on an under-utilised H100. Keep batch 16 for comparable
+  models; note memory is ~linear in `batch_size x train_steps` (5.6 GB at 16x80).
 - The node has 250 GB RAM, so `train.sbatch`'s default `--mem=64G` fits only **3**
   jobs. `slurm/submit_sweep.sh` overrides `MEM=16G CPUS=4` so all 14 slices run at
   once (an 18-job sweep then takes ~2 h).
@@ -98,9 +104,9 @@ Fallback if we want zero lock divergence: `uv venv --python 3.13` +
 - **Perf**: `cudnn.benchmark` + TF32 enabled automatically on CUDA. `--amp bf16`
   is worth ~1.3x. `torch.compile` does **not** help (see `AGENTS.md`).
 - **Batch size**: the unroll keeps activations for *every* step, so GPU memory is
-  ~linear in `batch_size x train_steps` (~6 GB at 16x80 on a 72² grid). Batch 16
-  is near the ceiling on a `1g.10gb` MIG slice; use a full GPU, a shorter
-  `--train-steps`, or gradient checkpointing to go higher.
+  ~linear in `batch_size x train_steps` (5.6 GB at 16x80 on a 72² grid, 3.0 GB
+  with bf16). But throughput is also linear in batch, so a bigger batch does
+  **not** speed up training on MIG - it only helps fill an under-utilised H100.
 - **Run naming**: `--run-name` gives a deterministic `runs/<name>/`.
 - Targets are pre-cached in `assets/targets/` (committed), so compute nodes need
   no internet.
