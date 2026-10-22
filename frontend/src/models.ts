@@ -61,7 +61,13 @@ export interface ModelGroup {
 }
 
 /** Groups are shown in this order; any other group name is appended after. */
-export const GROUP_ORDER = ['Emoji sweep', 'Crab · capacity', 'Crab · checkpoints', 'Demos'];
+export const GROUP_ORDER = [
+  'Emoji sweep',
+  'Crab · capacity',
+  'Crab · checkpoints',
+  'Crab · experiments',
+  'Demos',
+];
 
 /**
  * Presentation grouping for the model picker, derived from the model id so no
@@ -89,5 +95,11 @@ export function modelGroup(m: ManifestModel): ModelGroup {
   // Regime sweep: cactus_growing, crab_regenerating, ...
   mt = /^(\w+)_(growing|persistent|regenerating)$/.exec(id);
   if (mt) return { group: 'Emoji sweep', label: `${mt[1]} · ${mt[2]}`, order: 0 };
+  // One-off study runs on the crab (crab_learnperc, crab_noisy, ...). Must come
+  // after the regime rule so crab_growing / crab_regenerating stay in the sweep.
+  mt = /^crab_(.+)$/.exec(id);
+  if (mt) {
+    return { group: 'Crab · experiments', label: mt[1].replace(/_/g, ' '), order: 0 };
+  }
   return { group: 'Other', label: id, order: 0 };
 }

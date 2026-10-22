@@ -540,6 +540,78 @@
       }
     },
     {
+      "id": "crab_learnperc",
+      "path": "crab_learnperc/model.onnx",
+      "meta": {
+        "id": "crab_learnperc",
+        "created": "2026-10-22T03:43:12",
+        "channel_n": 16,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "learn_perception": true,
+        "perception_kernel": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          -0.26620355,
+          0.00260917,
+          0.25132445,
+          -0.32912809,
+          -0.0349665,
+          0.32665986,
+          -0.26874307,
+          0.01514184,
+          0.26609105,
+          -0.23484951,
+          -0.33167258,
+          -0.20889618,
+          0.00836952,
+          -0.01641554,
+          0.01531604,
+          0.28029951,
+          0.31708896,
+          0.29771593
+        ],
+        "num_parameters": 8354,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 19,
+        "experiment": "regenerating",
+        "target": "emoji:1f980",
+        "source_checkpoint": "runs/crab_regen_learnperc/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 1.9073486328125e-06,
+          "80": 1.9073486328125e-06
+        },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "perception_n": 48,
+          "perception_padded_n": 48,
+          "offsets": {
+            "w1": 0,
+            "b1": 6144,
+            "w2": 6272,
+            "b2": 8320
+          },
+          "count": 8336
+        },
+        "size_bytes": 49818,
+        "git_rev": "e82796f"
+      }
+    },
+    {
       "id": "crab_persistent",
       "path": "crab_persistent/model.onnx",
       "meta": {
@@ -1339,5 +1411,5 @@
       }
     }
   ],
-  "generated": "2026-10-22T02:19:39"
+  "generated": "2026-10-22T03:43:12"
 }

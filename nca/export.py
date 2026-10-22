@@ -72,7 +72,13 @@ def infer_dims(state_dict: dict) -> tuple[int, int]:
 def _load_ca(checkpoint: str | Path, wrap: bool = True) -> NeuralCA:
     state = torch.load(checkpoint, map_location="cpu")
     channel_n, hidden_n = infer_dims(state)
-    ca = NeuralCA(channel_n=channel_n, hidden_n=hidden_n, wrap=wrap)
+    # A --learn-perception checkpoint carries the `sobel` parameter.
+    ca = NeuralCA(
+        channel_n=channel_n,
+        hidden_n=hidden_n,
+        wrap=wrap,
+        learn_perception="sobel" in state,
+    )
     ca.load_state_dict(state)
     ca.eval()
     return ca
