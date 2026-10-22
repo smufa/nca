@@ -58,8 +58,10 @@ sbatch -p mig-priority --constraint=mig --gres=gpu:1g.10gb:1 \
 
 ## Environment
 
-`requires-python` was relaxed to `>=3.12` so the cluster can use stable Python
-3.13 (uv would otherwise pull a 3.14 release candidate).
+`requires-python` is `>=3.13`: **3.14** is the laptop dev version
+(`.python-version`), **3.13** is what the cluster runs (`uv sync --python 3.13`
+below). CI exercises both, so neither can rot. (Relaxing from `>=3.12` was what let
+uv pick 3.14 locally — the floor is the cluster's version, not the laptop's.)
 
 Local env is unchanged (CPU torch via `[tool.uv.sources]`). On the cluster:
 

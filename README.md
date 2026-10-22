@@ -69,14 +69,17 @@ fire mask as inputs, so a frontend can drive the loop and manipulate the kernel
 
 ```bash
 uv run python -m nca.export --checkpoint runs/.../ckpt_final.pt \
-    --id lizard --experiment regenerating --target "emoji:🦎" --verify
+    --id lizard --experiment regenerating --target "emoji:1f980"
 ```
 
-Outputs land in `exports/` (`model.onnx`, `meta.json`, `target.png`) and a
-`manifest.json` index. `--verify` runs the PyTorch and ONNX rollouts with
-identical masks at two grid sizes and asserts they agree (typically ~1e-7).
+Outputs land in `exports/` (`model.onnx`, `meta.json`, `weights.bin`,
+`target.png`) and a `manifest.json` index. Parity checking is on by default: the
+PyTorch and ONNX rollouts run with identical masks at two grid sizes and must
+agree (typically ~1e-7); `--no-verify` skips it. `--all` re-exports every model
+whose source checkpoint still exists, and `--reindex` rebuilds `manifest.json`
+from the per-model `meta.json` files (which are the source of truth).
 
-See [`PLAN.md`](PLAN.md) for the ONNX interface, the WebGPU frontend design and
+See [`PLAN.md`](PLAN.md) for the ONNX interface, the two frontend engines and the
 performance notes, and [`TRAINING.md`](TRAINING.md) for training on the ARNES
 SLURM cluster (H100, mixed-precision env, sweeps).
 
@@ -191,7 +194,9 @@ On a GPU, use the paper settings.
 
 ```
 main.py              CLI entry point
+nca/spec.py          ModelSpec: one source of truth for a model's shape
 nca/model.py         NeuralCA module: perception, update rule, masking
+tests/               pytest: weights layout, exporter, training smoke
 nca/targets.py       target loading / preprocessing / seed
 nca/pool.py          sample pool
 nca/train.py         training loop, damage masks, gradient normalisation

@@ -1,31 +1,35 @@
-# Plan: NCA → ONNX → WebGPU analysis playground
+# Plan: NCA → ONNX → playground
 
-Reimplementation of *Growing Neural Cellular Automata* (Mordvintsev et al., Distill 2020).
-This document covers the **inference/export pipeline and web frontend**. Training stays in
-Python and is expected to move to a GPU cluster.
+Reimplementation of *Growing Neural Cellular Automata* (Mordvintsev et al., Distill
+2020). This document covers the **inference/export pipeline and the web frontend**.
+Training lives in `README.md` / `TRAINING.md`; measurements in `docs/findings/`.
+
+Its job is now narrower than when it was written: it records the **decisions that are
+expensive to re-derive** (graph interface, dynamic shapes, export flags) and the
+roadmap. Anything that turned out to be a measurement lives in `docs/findings/`.
 
 ## Goals
 
-- Export trained NCA checkpoints to ONNX as a **single CA step**.
-- Run them in the browser on **WebGPU** with `onnxruntime-web`.
-- Build a **general playground** for **deep analysis of a single model**
-  (not a guided narrative, not multi-model comparison).
+- Export a trained checkpoint to ONNX as a **single CA step**.
+- Run it in the browser two ways: `onnxruntime-web` (WASM, compatibility) and a native
+  **WGSL** engine (performance, the default fast path).
+- A **general playground** for deep analysis of a single model — not a guided
+  narrative, not multi-model comparison.
 
-## Decisions (agreed)
+## Decisions
 
-| # | Decision |
-|---|---|
-| 1 | **Dynamic perception kernels** passed from JS (identity / sobel_x / sobel_y), so the UI can manipulate them. Static/baked kernels deferred. |
-| 2 | Perception + update live in **one** ONNX model. |
-| 3 | **WebGPU only** for now; other execution providers are a later fallback. |
-| 4 | General **playground**, single-model deep analysis. |
-| 5 | Training is separate (GPU cluster); the exporter is **standalone** and takes a `.pt` path. |
-| 6 | **Commit** exported `.onnx` models (they are small, ~10–50 KB). |
-| 7 | Dynamic `H`/`W` shapes (verified safe on the WebGPU/WASM path, see below). |
+| # | Decision | Why / consequence |
+|---|---|---|
+| 1 | **Perception kernels are a graph *input***, not initializers | the kernel lab can rotate / scramble them without re-exporting. Costs a runtime transpose of ~1.7 KB per step and forfeits graph capture; measured negligible. |
+| 2 | Perception + update in **one** ONNX model | one `session.run`/dispatch per step; the exported graph *is* the step. |
+| 3 | Two frontend engines, `wasm` + shader | the ORT WebGPU EP was removed — see `docs/findings/frontend-engines.md`. |
+| 4 | General **playground**, single-model deep analysis | per-model UI, no cross-model tables. |
+| 5 | Training is separate; the exporter is **standalone** and takes a checkpoint path | cluster → laptop handoff stays a file copy. |
+| 6 | **Commit** exported models (~10–50 KB each) | the playground works from a clone, no download step, and the metas are the regression corpus for `nca/spec.py`. |
+| 7 | Dynamic `H`/`W` | see below; `--static` opts out. |
+| 8 | The model's **shape is data** (`nca/spec.py`, `spec.json`, `meta.json`) | never infer `C`/hidden from tensor shapes — that was the `nca/sample.py` bug. |
 
 ## ONNX graph interface
-
-One step of the CA, fully deterministic (randomness lives in JS):
 
 ```
 Inputs
@@ -33,147 +37,98 @@ Inputs
   perception_weight   float32 [3C, 1, 3, 3]    JS expands the 3 base kernels per channel
   fire_mask           float32 [B, 1, H, W]     per-cell update mask (0/1)
   step_size           float32 []               optional
+  cond                float32 [B, cond_n, 1, 1]  only for --targets models
 Output
   x_next              float32 [B, C, H, W]
 ```
 
-Graph = depthwise Sobel conv (`groups=C`) → 1×1 conv `3C→hidden` → ReLU →
-1×1 conv `hidden→C` → `x + dx*fire_mask*step_size` → living-cell masking
-(`MaxPool` → `Greater` → `And` → `Mul`).
+Graph: depthwise conv (`groups=C`, the kernels above) → `3C→hidden` → ReLU →
+(optional hidden→hidden) → `hidden→C` → `x + dx*fire_mask*step_size` → living-cell
+masking (`MaxPool` → `Greater` → `And` → `Mul`), all inside one
+`Pad(mode="wrap")`. The exact layer stack is `ModelSpec.depth`; the weight order is
+`ModelSpec.weight_offsets()` (which `weights.bin` and the shader both follow).
 
 The UI edits three 3×3 matrices; JS expands them with `w[3*ci+cm] = kernel[cm]` so the
-conv output stays `[state, grad_x, grad_y]` per input channel, preserving the trained
-update rule's semantics.
+conv output stays `[state, grad_x, grad_y]` per channel, preserving the trained update
+rule's semantics.
 
-### Dynamic shapes — findings
+### Dynamic shapes
 
-- The current WebGPU/WASM path does **not** validate input dims against the graph:
-  `InferenceSession.run` (`js/common/lib/inference-session-impl.ts`) only checks feed
-  presence/names; `session-handler-inference.ts` and `prepareInputOutputTensor`
-  (`wasm-core-impl.ts`) build tensors from the supplied dims directly.
-- The well-known "expected shape `[,,,]`" error originates in the **legacy onnxjs/WebGL
-  backend** (`js/web/lib/onnxjs/session.ts`, `validateInputTensorDims`), which does
-  static dim validation. That backend is not our target.
-- Conclusion: dynamic `H`/`W` are safe for WebGPU. `--verify` runs at a second shape to
-  prove it.
-
-## Performance notes: static vs dynamic kernels
-
-| Aspect | Static kernels (initializers) | Dynamic kernels (graph inputs) — *current choice* |
-|---|---|---|
-| Conv FLOPs | identical | identical |
-| Weight layout | **prepacked once** at session init (HWIO) | runtime transpose every call |
-| Weight upload | none | ~1.7 KB/step (negligible) |
-| **Graph capture** | ✅ possible (needs static shapes + all-GPU) | ❌ not possible |
-| UI control | requires re-export / session rebuild | instant |
-
-**Takeaway:** dynamic kernels cost almost nothing per step, but forfeit graph capture.
-If profiling shows per-step `session.run` overhead dominating, revisit by baking kernels
-as initializers and rebuilding the ~8 KB session on change.
-
-Additional WebGPU notes:
-- WebGPU EP **prefers NHWC**; ORT inserts layout transforms for our NCHW graph. An
-  NHWC-exported variant may be faster — defer.
-- JSEP is deprecated in favor of the native WebGPU EP; pin an `onnxruntime-web` version
-  and test both builds (`.webgpu.mjs` vs `.bundle`).
+ORT's session (`wasm`) does not validate input dims against the graph: `run` checks
+feed presence/names and builds tensors from the supplied dims. The classic "expected
+shape `[,,,]`" error comes from the legacy onnxjs/WebGL backend, which is not in play.
+So `H`/`W` stay dynamic and `--verify` re-runs at a second shape to prove it. The
+shader engine has no shape at all (`H`/`W` are storage-buffer extents set per launch).
 
 ## Export pipeline
 
-`nca/export.py`:
-
 ```bash
-uv run python -m nca.export --checkpoint ckpt.pt --id lizard --grid-size 64 \
-    --experiment regenerating --target "emoji:🦎" --verify --out exports/
+uv run python -m nca.export --checkpoint runs/x/ckpt_final.pt --id NAME \
+    --experiment regenerating --target "emoji:1f980"   # parity checked by default
+uv run python -m nca.export --all        # every model whose checkpoint is still reachable
+uv run python -m nca.export --reindex    # rebuild manifest.json from exports/*/meta.json
 ```
 
-Emits:
+`exports/<id>/` = `model.onnx`, `meta.json`, `weights.bin`, `target.png`, `spec.json`.
 
-```
-exports/
-  manifest.json
-  <id>/
-    model.onnx
-    meta.json        # channels, hidden, fire_rate, grid, dynamic, opset, experiment,
-                     # target, source checkpoint, versions, parity result
-    target.png       # padded target for the UI (if available)
-```
-
-- `--verify` runs N steps in PyTorch and `onnxruntime` (CPU) with identical masks at
-  **two different shapes** and asserts `max_abs_diff < 1e-4`.
-- `--grid-size` sets the dummy shape; spatial axes are dynamic by default and
-  `--static` fixes them. `--all <run-dir>` (future) exports every checkpoint.
-- The dynamo exporter writes weights as **external data** by default
-  (`model.onnx.data`), which ORT-Web will not fetch automatically — the exporter
-  passes `external_data=False` so the `.onnx` is self-contained.
+- **Parity is on by default** (`--no-verify` to skip): N steps in PyTorch vs
+  onnxruntime with identical masks at two shapes; ~1e-6 is normal.
+- **Dynamo exporter** (`torch.onnx.export(dynamo=True)`, opset 19,
+  `external_data=False` so the `.onnx` is self-contained — ORT-Web will not fetch
+  `model.onnx.data`). `dynamic_shapes` takes positional / forward arg names, not ONNX
+  input names.
+- **Wrap padding is one `Pad(mode="wrap")` node** (20 Slice/Concat nodes → 1).
+- `meta.json` is validated against `nca/spec.py` by `scripts/check_meta.py` (CI); it
+  records version, parity error, git rev, training provenance and the sweep it belongs
+  to. Re-exporting 45 models by hand is how drift happens — `--all` + `check_meta` is
+  the supported path.
 
 ## Frontend architecture
 
-Vite + TypeScript + `onnxruntime-web`, minimal deps. WebGPU only, with a clear
-"WebGPU unavailable" gate.
+Vite + TypeScript, minimal deps, two engines behind one interface.
 
 ```
-frontend/
-  vite.config.ts        # dev server; publicDir -> ../exports
-  index.html
-  src/
-    main.ts             # bootstrap
-    runner.ts           # CaRunner: session, ping-pong buffers, step(), seeded fire mask
-    render.ts           # state -> ImageData (premultiplied RGB over bg), Canvas2D
-    models.ts           # manifest types + loading
-    analysis/           # per-channel views, gradient views, stats, timeline
-    ui/                 # controls, canvas grid, kernel editor, timeline scrubber
+frontend/src/
+  engine.ts     CaEngine: the only surface main.ts talks to (step/render/brush/sync/cond)
+  runner.ts     CaRunner   : ort-wasm session, ping-pong Float32Array, CPU mirror
+  shader.ts     ShaderRunner: WGSL pipelines, GPU state buffer, render + brush on GPU
+  wgsl/         pass1 (perception+MLP+masks), pass2, draw (premultiplied composite)
+  nca.ts        pure helpers: kernel expansion, seed, channel->RGB mapping
+  main.ts       UI: views, brush, kernel lab, engine/grid switches
+  models.ts     manifest types, target labels/emoji, picker grouping
 ```
 
-- **CaRunner**: `InferenceSession` with `['webgpu']`, warm-up run on load, ping-pong
-  `Float32Array`s, optional IO binding to keep tensors on GPU, seeded PRNG for masks.
-- **Render**: Canvas2D `putImageData` at grid resolution, scaled with
-  `image-rendering: pixelated`. Upgrade path: WebGL/WebGPU texture compositing.
 - **Loop**: `requestAnimationFrame`, steps/frame from a speed control.
+- **Views**: N panels, each mapping any three state channels to RGB (plus alpha and
+  background) — the first defaults to 0/1/2 over white, new ones to the next hidden
+  channel as grayscale.
+- **Kernel lab**: identity / sobel_x / sobel_y editors + rotation. This is the probe
+  that found the robustness result in `docs/findings/robustness.md`.
+- **Target picker**: only for conditional models; a *vector* of sliders (-1..1), and
+  switching it **does not reset the state** (in-place conversion is the measurement —
+  `docs/findings/conditioning.md`).
 
-### Analysis features (single-model deep dive)
+## Roadmap
 
-- **Channel-mapping views**: any number of panels; each maps any three state
-  channels to R/G/B, with an optional alpha channel and background for
-  compositing. The first view defaults to channels 0/1/2 with alpha 3 over white
-  (the familiar RGB view); new views default to the next hidden channel as a
-  grayscale map.
-- Perception gradient views (gx, gy) and update magnitude.
-- Fire-mask overlay.
-- Timeline: ring-buffer of snapshots, scrub / step-back / replay.
-- Kernel lab: identity / sobel_x / sobel_y editors + rotation slider (Experiment 4).
-- Perturbation: damage brush, seed planting, reset, seeded RNG.
-- Stats: per-channel mean/min/max/variance over time, loss-to-target curve.
-- Controls: speed, fire_rate, step_size, grid size.
+Shipped: M1 export + parity · M2 Vite app load/grow/play · M3 views/brush/grid ·
+M4 kernel lab · M5 WGSL engine + headless bench · M6 `ModelSpec` + run-directory
+provenance + tests/CI.
 
-## Repo layout
+Next, in rough order:
 
-```
-nca/export.py             export CLI + parity verification
-exports/                  committed models + manifest.json
-frontend/                 Vite app (publicDir -> ../exports)
-```
-
-## Milestones
-
-1. **M1** — `export.py` + Python parity check at two shapes. ✅ done
-   - `torch.onnx.export(dynamo=True)`, opset 19, `dynamic_shapes` (positional /
-     forward arg names, not ONNX input names), `external_data=False`.
-   - Wrap-padding is a single `Pad(mode="wrap")` (20 Slice/Concat nodes -> 1), and
-     the exporter also writes `weights.bin` for the WGSL engine.
-2. **M2** — Vite app: load a model, grow, RGB view, play/pause/speed. ✅ done
-3. **M3** — channel-mapping views, `1ch` toggle, brush, grid size. ✅ done
-4. **M4** — kernel lab (rotation + editable 3×3 kernels). ✅ done
-5. **M5** — performance: native WGSL engine (2 passes, zero-copy render + GPU
-   brush) plus a headless bench harness. See [`AGENTS.md`](AGENTS.md).
-
-## Not done yet
-
-- Timeline scrubber, per-channel stats over time.
-- Perception-view export (a graph that also outputs `[state, gx, gy]`).
-- Register-tiled shader (more headroom at large grids).
-- Tests/CI beyond `npm run build`, `compileall` and the bench harness.
+1. **Larger-grid / texture targets** and the shader headroom that implies
+   (tiled GEMM; `docs/findings/shader-perf.md` lists what was already rejected).
+2. **Timeline scrubber** (ring buffer of snapshots) + per-channel stats over time.
+3. **Perception-view export** — a graph variant that also emits `[state, gx, gy]`.
+4. **Scoring harness** (`nca/score.py`) so the conversion/quality numbers in
+   `docs/findings/*` are generated, not typed.
+5. Docs: delete `README.md`'s duplicated design sections once `PLAN.md` covers them
+   (Phase 3 in `docs/HOUSEKEEPING.md`).
 
 ## Open questions
 
-- Checkpoint handoff from the GPU cluster: same repo dir vs. separate artifacts
-  path? (The exporter takes an arbitrary `--checkpoint` path, so this is low-risk.)
+- Checkpoint handoff: upload artifacts vs. same repo dir? (The exporter takes an
+  arbitrary `--checkpoint`, so this stays low-risk until runs get big.)
+- Whether the 45 committed exports are still worth their weight as a *regression
+  corpus* once `ModelSpec` round-trips are covered by fixtures — they also cost
+  frontend picker clutter.
