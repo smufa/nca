@@ -56,6 +56,14 @@ def main() -> None:
     ap.add_argument("--iters", type=int, default=20)
     ap.add_argument("--breakdown", action="store_true")
     ap.add_argument("--variants", action="store_true")
+    ap.add_argument(
+        "--batches", type=int, nargs="*", default=[16, 32, 64, 128],
+        help="batch sizes to sweep in --variants",
+    )
+    ap.add_argument(
+        "--cuda-graphs", action="store_true",
+        help="also try torch.compile(mode=reduce-overhead) at the smallest batch",
+    )
     args = ap.parse_args()
 
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -122,41 +130,55 @@ def main() -> None:
         print(f"loss.item() sync              {t_item:8.2f}")
 
     if args.variants:
-        print("\n== variants (full _train_step, ms) ==")
+        print("\n== variants (full _train_step) ==")
         variants = []
-        for batch in (16, 32, 64):
+        for batch in args.batches:
             for amp in ("off", "bf16"):
                 variants.append((batch, amp, "eager"))
-            variants.append((batch, "off", "reduce-overhead"))  # CUDA-graph hypothesis
+        if args.cuda_graphs:
+            variants.append((args.batches[0], "off", "reduce-overhead"))
         rows = []
         for batch, amp, mode in variants:
 
-            def raw(x, nn, _ca=ca):
-                for _ in range(nn):
-                    x = _ca(x)
+            def raw(x, masks, _ca=ca):
+                for k in range(masks.shape[0]):
+                    x = _ca(x, update_mask=masks[k])
                 return x
 
             fwd = raw if mode == "eager" else torch.compile(raw, mode=mode, dynamic=False)
             c = TrainConfig(batch_size=batch, amp=amp, train_steps_min=n, train_steps_max=n + 1)
             b = seed.unsqueeze(0).repeat(batch, 1, 1, 1).contiguous()
+            bm = torch.rand((n, batch, 1, h, w), device=dev) <= ca.fire_rate
+            if dev.type == "cuda":
+                torch.cuda.empty_cache()
+                torch.cuda.reset_peak_memory_stats()
             try:
                 ms = timeit(
-                    lambda: _train_step(ca, fwd, optimizer, b, target, c, gen),
+                    lambda: _train_step(ca, fwd, optimizer, b, target, c, bm),
                     dev,
                     n=max(5, args.iters // 2),
                     warmup=3,
                 )
-            except Exception as e:  # noqa: BLE001
-                print(f"  batch={batch:3d} amp={amp:4s} {mode:15s} ERROR {e}")
+            except RuntimeError as e:  # almost always CUDA OOM
+                print(f"  batch={batch:4d} amp={amp:4s} {mode:15s} FAILED: {e}")
+                if dev.type == "cuda":
+                    torch.cuda.empty_cache()
                 continue
+            peak = (
+                torch.cuda.max_memory_allocated() / 1e9 if dev.type == "cuda" else 0.0
+            )
             rows.append((batch, amp, mode, ms))
             print(
-                f"  batch={batch:3d} amp={amp:4s} {mode:15s} {ms:8.2f} ms  "
-                f"({1000 / ms:6.2f} it/s, {1000 / ms * batch:7.0f} samples/s)"
+                f"  batch={batch:4d} amp={amp:4s} {mode:15s} {ms:8.2f} ms  "
+                f"({1000 / ms:6.2f} it/s, {1000 / ms * batch:7.0f} samples/s, "
+                f"peak {peak:5.2f} GB)"
             )
         if rows:
-            best = min(rows, key=lambda r: r[3])
-            print(f"\nbest: batch={best[0]} amp={best[1]} {best[2]} -> {best[3]:.2f} ms")
+            best = max(rows, key=lambda r: r[0] / r[3] / 1000)
+            print(
+                f"\nbest throughput: batch={best[0]} amp={best[1]} {best[2]} "
+                f"-> {1000 / best[3] * best[0]:.0f} samples/s"
+            )
 
 
 def forward_n(ca: NeuralCA, x: torch.Tensor, n: int) -> torch.Tensor:
