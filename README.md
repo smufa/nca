@@ -160,11 +160,18 @@ stabilises long unrolls.
 
 Three regimes are available via `--experiment`:
 
-| experiment | sample pool | damage | idea |
-| --- | --- | --- | --- |
-| `growing` | off | 0 | grow the target from the seed (Experiment 1) |
-| `persistent` | on | 0 | learn an attractor so the pattern persists (Experiment 2) |
-| `regenerating` | on | 3 | also damage pool states so the model heals (Experiment 3) |
+| experiment | sample pool | damage | noise | idea |
+| --- | --- | --- | --- | --- |
+| `growing` | off | 0 | 0 | grow the target from the seed (Experiment 1) |
+| `persistent` | on | 0 | 0 | learn an attractor so the pattern persists (Experiment 2) |
+| `regenerating` | on | 3 | 0 | also damage pool states so the model heals (Experiment 3) |
+| `noisy` | on | 3 | 4×0.2 | also corrupt states with Gaussian noise, so the model reconstructs |
+
+`noisy` is `regenerating` plus additive Gaussian state noise (`--noise-n` samples
+per batch, `--noise-std` the stddev; also settable directly). Circle damage only
+ever zeroes contiguous blobs, so the noise is what forces the model to pull an
+*arbitrary* corrupted state back to the target. The first slot of every batch
+stays the clean seed.
 
 With the sample pool, each training step samples a batch of previously seen
 states, replaces the highest-loss sample with the fresh seed (so the model

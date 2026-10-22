@@ -35,7 +35,7 @@ The whole point of the architecture is that **one trained model = a single
 
 ```
 nca/model.py        NeuralCA (perception, update rule, fire + living masks)
-nca/train.py        training loop (sample pool, damage, grad normalisation, resume)
+nca/train.py        training loop (sample pool, damage + noise, grad normalisation, resume)
 nca/targets.py      target images: emoji / image file / procedural shapes
 nca/export.py       export a checkpoint to ONNX + parity check + weights.bin
 nca/cli.py          `python main.py` entry point (train)
