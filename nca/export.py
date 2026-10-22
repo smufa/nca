@@ -241,11 +241,31 @@ def _git_rev() -> str | None:
         return None
 
 
+def _run_layout(checkpoint: Path) -> tuple[int | None, int | None]:
+    """``(target_size, padding)`` the run was trained with, from its ``train.json``.
+
+    The only trustworthy source once ``target.npy`` is gone: the two numbers
+    together decide the canvas (``grid == target_size + 2*padding``), and neither
+    can be recovered from the checkpoint or the grid alone. The old fallback here
+    (40/16) disagreed with the training CLI's (32/8), which silently re-rendered
+    ``target.png`` on a different canvas than the model was grown on.
+    """
+    train_json = checkpoint.parent / "train.json"
+    if not train_json.is_file():
+        return None, None
+    try:
+        data = json.loads(train_json.read_text())
+    except json.JSONDecodeError:
+        return None, None
+    size, pad = data.get("target_size"), data.get("padding")
+    return (int(size) if size is not None else None, int(pad) if pad is not None else None)
+
+
 def _find_target(
     checkpoint: Path,
     target: str | None = None,
-    max_size: int = 40,
-    padding: int = 16,
+    max_size: int | None = None,
+    padding: int | None = None,
 ) -> np.ndarray | None:
     """The ``[N, 4, H, W]`` target the run was trained on.
 
@@ -258,6 +278,12 @@ def _find_target(
     if candidate.exists():
         return np.load(candidate)
     if not target or target == "unknown":
+        return None
+    if max_size is None or padding is None:
+        print(
+            "  no target.npy and no target_size/padding on record; skipping target.png "
+            "(pass --target-size/--padding, or export from the run directory)"
+        )
         return None
     try:
         return prepare_targets([target], max_size=max_size, padding=padding).numpy()
@@ -349,8 +375,8 @@ def export_one(
     verify_steps: int,
     wrap: bool = True,
     targets: list[str] | None = None,
-    max_size: int = 40,
-    padding: int = 16,
+    max_size: int | None = None,
+    padding: int | None = None,
 ) -> dict:
     import onnx
     import onnxruntime as ort
@@ -359,6 +385,12 @@ def export_one(
     out_dir = Path(out_dir)
     model_dir = out_dir / model_id
     model_dir.mkdir(parents=True, exist_ok=True)
+
+    # Explicit flag > the run's own train.json > unknown. Deliberately no default:
+    # inventing one is what put target.png on a different canvas than the run.
+    run_size, run_padding = _run_layout(checkpoint)
+    max_size = max_size if max_size is not None else run_size
+    padding = padding if padding is not None else run_padding
 
     ca = _load_ca(checkpoint, wrap=wrap)
     spec = ca.spec
@@ -488,8 +520,10 @@ def export_all(
                 verify_steps=verify_steps,
                 wrap=spec.wrap,
                 targets=meta.get("targets"),
-                max_size=int(meta.get("target_size", 40)),
-                padding=int(meta.get("padding", 16)),
+                # Preserve the *recorded* canvas (None stays None: a legacy meta
+                # without target_size/padding must not silently gain a default).
+                max_size=meta.get("target_size"),
+                padding=meta.get("padding"),
             )
         )
 
@@ -548,15 +582,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--target-size",
         type=int,
-        default=40,
-        help="target canvas this run was trained with (only used when the run has "
-        "no target.npy and --target has to be reloaded for target.png)",
+        default=None,
+        help="target canvas this run was trained with (default: the run's train.json; "
+        "needed only when the run has no target.npy and --target must be reloaded)",
     )
     p.add_argument(
         "--padding",
         type=int,
-        default=16,
-        help="border this run was trained with; grid == target-size + 2*padding",
+        default=None,
+        help="border this run was trained with; grid == target-size + 2*padding "
+        "(default: the run's train.json)",
     )
     p.add_argument(
         "--no-wrap",

@@ -257,6 +257,10 @@ def main(argv: list[str] | None = None) -> None:
             "target": args.target,
             "targets": list(specs),
             "grid": [int(h), int(w)],
+            # The canvas split, so an export can rebuild target.png on the same
+            # grid even after target.npy is gone (grid = target_size + 2*padding).
+            "target_size": args.target_size,
+            "padding": args.padding,
         },
     )
 
