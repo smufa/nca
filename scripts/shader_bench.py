@@ -79,6 +79,12 @@ def main() -> None:
     ap.add_argument("--runs", type=int, default=3, help="benchmark repeats")
     ap.add_argument("--covx", type=int, default=8, help="cells covered per workgroup in x")
     ap.add_argument("--covy", type=int, default=8, help="cells covered per workgroup in y")
+    ap.add_argument(
+        "--consts",
+        action="store_true",
+        help="pass the size override constants even with --shader (needed for a "
+        "modified pass1 that keeps the override declarations)",
+    )
     args = ap.parse_args()
 
     out_dir = ROOT / "exports" / args.model
@@ -87,9 +93,15 @@ def main() -> None:
     cond_n = int(meta.get("cond_n", 0) or 0)
     grid = args.grid or meta["grid"]
     hidden = meta["weights"]["hidden_n"]
+    layers = int(meta["weights"].get("hidden_layers", 1))
     off = meta["weights"]["offsets"]
     weights = np.fromfile(out_dir / "weights.bin", dtype="<f4")
     pass1_wgsl = (args.shader or (WGSL_DIR / "pass1.wgsl")).read_text()
+    # HMAX must be a const-expression equal to the real hidden-group count, so it
+    # is substituted per model (same as the frontend does).
+    pass1_wgsl = pass1_wgsl.replace(
+        "HMAX: u32 = 64u", f"HMAX: u32 = {max(hidden // 4, 1)}u"
+    )
     pass2_wgsl = (WGSL_DIR / "pass2.wgsl").read_text()
 
     plane = grid * grid
@@ -135,10 +147,12 @@ def main() -> None:
     w1s4 = -(-(3 * C + cond_n) // 4)  # ceil((3C + cond_n) / 4)
     # Size constants are pipeline overrides; the scripted variants hardcode their
     # own sizes, so only the default pass1/pass2 get them.
-    const1 = {} if args.shader else {
-        "C": C, "NP4": w1s4, "W1S4": w1s4, "HG": hidden // 4, "CONDN": cond_n,
-    }
-    const2 = {} if args.shader else {"C": C}
+    use_consts = args.consts or not args.shader
+    const1 = {
+        "C": C, "NP4": w1s4, "W1S4": w1s4, "HG": hidden // 4,
+        "CONDN": cond_n, "LH": layers,
+    } if use_consts else {}
+    const2 = {"C": C} if use_consts else {}
     p1 = device.create_compute_pipeline(
         layout=pl1, compute={"module": m1, "entry_point": "main", "constants": const1}
     )
@@ -169,6 +183,7 @@ def main() -> None:
     params = bytearray(48)
     struct.pack_into("<8I", params, 0, C, grid, grid, hidden, off["w1"], off["b1"], off["w2"], off["b2"])
     struct.pack_into("<f", params, 32, 1.0)
+    struct.pack_into("<I", params, 36, off.get("wmid", 0))
     paramsBuf = device.create_buffer_with_data(data=bytes(params), usage=wgpu.BufferUsage.UNIFORM | D)
 
     def bg1(state):

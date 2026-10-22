@@ -45,7 +45,17 @@ export class ShaderRunner implements CaEngine {
   private device: GPUDevice;
   private adapterDesc: string;
   private hidden: number;
-  private off: { w1: number; b1: number; w2: number; b2: number };
+  private layers = 1;
+  private wmid = 0;
+  private off: {
+    w1: number;
+    b1: number;
+    w2: number;
+    b2: number;
+    wmid?: number;
+    bmid?: number;
+    mid_stride?: number;
+  };
   private weightData: Float32Array;
 
   private stateA!: GPUBuffer;
@@ -97,6 +107,8 @@ export class ShaderRunner implements CaEngine {
     this.seed = seed;
     this.hidden = model.meta.weights.hidden_n;
     this.off = model.meta.weights.offsets;
+    this.layers = model.meta.weights.hidden_layers ?? 1;
+    this.wmid = this.off.wmid ?? 0;
     this.kernels = modelKernels(model.meta);
     this.condN = model.meta.cond_n ?? 0;
     this.cond = new Float32Array(Math.max(this.condN, 1));
@@ -133,16 +145,15 @@ export class ShaderRunner implements CaEngine {
   }
 
   /**
-   * The WGSL step assumes at most 16 state channels, a multiple-of-4 hidden, and
-   * at most 16 one-hot selector values (perc is `array<f32, 64>` = 3*16 + 16).
+   * Limits of the WGSL step: perc is `array<f32, 64>` (3*16 + 16), perc4 is
+   * `array<vec4<f32>, 16>`, and the hidden vector is `array<vec4<f32>, HMAX=64>`
+   * because WGSL array sizes cannot be pipeline overrides.
    */
   static supports(model: ManifestModel): boolean {
     const C = model.meta.channel_n;
     const h = model.meta.weights.hidden_n;
     const condN = model.meta.cond_n ?? 0;
-    // The WGSL step implements a single hidden layer (one W1/W2 pair).
-    const layers = model.meta.hidden_layers ?? 1;
-    return C >= 4 && C <= 16 && h > 0 && h % 4 === 0 && condN <= 16 && layers === 1;
+    return C >= 4 && C <= 16 && h > 0 && h % 4 === 0 && h / 4 <= 64 && condN <= 16;
   }
 
   get mode(): string {
@@ -159,17 +170,24 @@ export class ShaderRunner implements CaEngine {
     // loops unrolled (dynamic bounds cost ~1.9x).
     const C = this.channelN;
     const p4 = Math.ceil((3 * C + this.condN) / 4);
+    const hg = this.hidden / 4;
+    // WGSL array sizes must be const-expressions, so HMAX is baked into the source
+    // per model rather than set as an override: sizing it to the actual hidden
+    // width keeps the deep path's hidden arrays (h, h2) as small as possible, and
+    // they are the main register-pressure source.
+    const src = PASS1.replace('HMAX: u32 = 64u', `HMAX: u32 = ${Math.max(hg, 1)}u`);
     const constants = {
       C,
       NP4: p4,
       W1S4: p4,
-      HG: this.hidden / 4,
+      HG: hg,
       CONDN: this.condN,
+      LH: this.layers,
     };
     this.pipeline1 = d.createComputePipeline({
       layout: 'auto',
       compute: {
-        module: d.createShaderModule({ code: PASS1 }),
+        module: d.createShaderModule({ code: src }),
         entryPoint: 'main',
         constants,
       },
@@ -306,6 +324,7 @@ export class ShaderRunner implements CaEngine {
       this.off.b2,
     ]);
     new Float32Array(buf, 32, 1)[0] = 1.0;
+    new Uint32Array(buf, 36, 1)[0] = this.wmid;
     this.device.queue.writeBuffer(this.paramsBuf, 0, buf);
   }
 

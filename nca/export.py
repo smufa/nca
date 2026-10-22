@@ -295,15 +295,22 @@ def _update_manifest(out_dir: Path, entry: dict) -> None:
 def _save_weights(ca: NeuralCA, model_dir: Path) -> dict:
     """Dump the update-rule MLP as a flat float32 blob for the WGSL engine.
 
-    Layout in floats: ``W1 [hidden, P4]``, ``b1 [hidden]``, ``W2 [C, hidden]``,
-    ``b2 [C]`` - row-major, matching ``ca.update``. ``P4`` is the logical
-    perception width (``3C + cond_n``) rounded up to a multiple of 4, so the shader
-    can read ``W1`` rows as ``vec4`` (zero padding columns are added when it is not
-    a multiple of 4).
-    For the paper size (``C=16``) ``P4 == 3C == 48`` so the layout is unchanged.
+    Layout in floats, for ``L`` hidden layers:
+
+        W1 [hidden, P4], b1 [hidden],
+        (W_i [hidden, hidden], b_i [hidden]) for i = 2..L,   # only when L > 1
+        W_out [C, hidden], b_out [C]
+
+    row-major, matching ``ca.update``. ``P4`` is the logical perception width
+    (``3C + cond_n``) rounded up to a multiple of 4 so the shader can read ``W1``
+    rows as ``vec4`` (zero padding columns are added when it is not a multiple of
+    4). The intermediate matrices need no padding: their rows are ``hidden`` wide
+    and the shader requires ``hidden % 4 == 0``.
+    For the paper size (``C=16``, one hidden layer) the layout is unchanged.
     """
     C = int(ca.channel_n)
     cond_n = int(ca.cond_n)
+    layers = int(getattr(ca, "hidden_layers", 1))
     p = 3 * C + cond_n  # perception width fed to update[0]
     w1 = ca.update[0].weight.detach().reshape(ca.update[0].out_channels, p)
     b1 = ca.update[0].bias.detach().reshape(-1)
@@ -320,20 +327,39 @@ def _save_weights(ca: NeuralCA, model_dir: Path) -> dict:
         w1 = np.pad(w1, ((0, 0), (0, p4 - p)))
     hidden = int(w1.shape[0])
 
-    blob = np.concatenate([w1.reshape(-1), b1, w2.reshape(-1), b2])
+    # Intermediate hidden -> hidden blocks, in update order (conv 2..layers).
+    mids: list[np.ndarray] = []
+    for li in range(1, layers):
+        conv = ca.update[2 * li]
+        mids.append(
+            conv.weight.detach().reshape(hidden, hidden).cpu().numpy().astype("<f4")
+        )
+        mids.append(conv.bias.detach().reshape(-1).cpu().numpy().astype("<f4"))
+
+    off = {"w1": 0, "b1": int(w1.size)}
+    cursor = int(w1.size + b1.size)
+    parts: list[np.ndarray] = [w1.reshape(-1), b1]
+    if mids:
+        # One block per intermediate layer: W (hidden*hidden) then b (hidden).
+        off["wmid"] = cursor
+        off["bmid"] = cursor + hidden * hidden
+        off["mid_stride"] = hidden * hidden + hidden
+        parts.extend(m.reshape(-1) for m in mids)
+        cursor += off["mid_stride"] * (layers - 1)
+    off["w2"] = cursor
+    off["b2"] = cursor + int(w2.size)
+    parts.extend([w2.reshape(-1), b2])
+
+    blob = np.concatenate(parts)
     (model_dir / "weights.bin").write_bytes(blob.tobytes())
     return {
         "file": "weights.bin",
         "channel_n": C,
         "hidden_n": hidden,
+        "hidden_layers": layers,
         "perception_n": p,
         "perception_padded_n": p4,
-        "offsets": {
-            "w1": 0,
-            "b1": int(w1.size),
-            "w2": int(w1.size + b1.size),
-            "b2": int(w1.size + b1.size + w2.size),
-        },
+        "offsets": off,
         "count": int(blob.size),
     }
 
