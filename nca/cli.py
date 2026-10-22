@@ -131,11 +131,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--lr-gamma", type=float, default=0.1)
     p.add_argument("--no-grad-norm", action="store_true")
     p.add_argument(
-        "--compile",
-        action="store_true",
-        help="torch.compile the CA step (faster unroll on GPU)",
-    )
-    p.add_argument(
         "--amp",
         choices=["off", "bf16"],
         default="off",
@@ -233,7 +228,6 @@ def main(argv: list[str] | None = None) -> None:
         make_gif=not args.no_gif,
         gif_steps=args.gif_steps,
         seed=args.seed,
-        compile=args.compile,
         amp=args.amp,
     )
 
@@ -250,7 +244,21 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Targets: {', '.join(specs)}  ({args.target_size}px, padded to {h}x{w})")
     if cond_n:
         print(f"Conditional model: cond_n={cond_n} one-hot selector")
-    train(ca, target, seed, cfg, device, out_dir, resume=args.resume)
+    train(
+        ca,
+        target,
+        seed,
+        cfg,
+        device,
+        out_dir,
+        resume=args.resume,
+        provenance={
+            "experiment": args.experiment,
+            "target": args.target,
+            "targets": list(specs),
+            "grid": [int(h), int(w)],
+        },
+    )
 
 
 if __name__ == "__main__":

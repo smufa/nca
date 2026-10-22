@@ -29,6 +29,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .model import NeuralCA, _circular_pad2d, _perception_kernels, get_living_mask
+from .spec import ModelSpec, find_checkpoint, load_model_state
+from .targets import prepare_targets
 from .viz import render, save_image
 
 DEFAULT_OPSET = 19
@@ -70,55 +72,21 @@ class ExportStep(nn.Module):
 
 
 def infer_dims(state_dict: dict) -> tuple[int, int]:
-    """Return ``(channel_n, hidden_n)`` from the update-rule weights.
+    """Deprecated: return ``(channel_n, hidden_n)`` from a state dict.
 
-    ``update.0`` takes ``3C + cond_n`` inputs, so the channel count has to come
-    from the *output* projection, not from the first layer's fan-in.
+    Kept only so external scripts keep working; use ``ModelSpec.from_state_dict``
+    instead, which also knows about ``cond_n``, ``hidden_layers`` and
+    ``learn_perception``.
     """
-    hidden_n = state_dict["update.0.weight"].shape[0]
-    channel_n = state_dict[f"update.{_last_layer_index(state_dict)}.weight"].shape[0]
-    return int(channel_n), int(hidden_n)
-
-
-def _last_layer_index(state_dict: dict) -> int:
-    """Index of the final ``update.N`` in the state dict (the output projection)."""
-    idx = [
-        int(k.split(".")[1])
-        for k in state_dict
-        if k.startswith("update.") and k.endswith(".weight")
-    ]
-    if not idx:
-        raise ValueError("no update.* weights in checkpoint")
-    return max(idx)
-
-
-def _hidden_layers(state_dict: dict) -> int:
-    """Number of hidden (ReLU) blocks: convs minus the output projection."""
-    n_convs = sum(
-        1
-        for k in state_dict
-        if k.startswith("update.") and k.endswith(".weight")
-    )
-    return max(n_convs - 1, 1)
+    spec = ModelSpec.from_state_dict(state_dict)
+    return spec.channel_n, spec.hidden_n
 
 
 def _load_ca(checkpoint: str | Path, wrap: bool = True) -> NeuralCA:
-    state = torch.load(checkpoint, map_location="cpu")
-    channel_n, hidden_n = infer_dims(state)
-    # A --learn-perception checkpoint carries the `sobel` parameter; a conditional
-    # one has a wider update.0 fan-in than 3C; a deeper one has more convs.
-    cond_n = int(state["update.0.weight"].shape[1]) - 3 * channel_n
-    if cond_n < 0:  # pragma: no cover - defensive
-        raise ValueError(f"bad update.0 fan-in for channel_n={channel_n}")
-    ca = NeuralCA(
-        channel_n=channel_n,
-        hidden_n=hidden_n,
-        wrap=wrap,
-        learn_perception="sobel" in state,
-        cond_n=cond_n,
-        hidden_layers=_hidden_layers(state),
-    )
-    ca.load_state_dict(state)
+    """Build a ``NeuralCA`` matching the checkpoint and load its weights."""
+    spec = ModelSpec.from_checkpoint(checkpoint, wrap=wrap)
+    ca = spec.build()
+    ca.load_state_dict(load_model_state(checkpoint))
     ca.eval()
     return ca
 
@@ -273,11 +241,29 @@ def _git_rev() -> str | None:
         return None
 
 
-def _find_target(checkpoint: Path) -> np.ndarray | None:
-    for candidate in (checkpoint.parent / "target.npy",):
-        if candidate.exists():
-            return np.load(candidate)
-    return None
+def _find_target(
+    checkpoint: Path,
+    target: str | None = None,
+    max_size: int = 40,
+    padding: int = 16,
+) -> np.ndarray | None:
+    """The ``[N, 4, H, W]`` target the run was trained on.
+
+    Preferred source is the run's own ``target.npy`` (written by ``nca/cli.py``).
+    Older runs predate it, so fall back to re-loading the ``--target`` spec --
+    which is why ``target_size``/``padding`` are recorded in ``meta.json``: without
+    them the same spec does not reproduce the same canvas.
+    """
+    candidate = checkpoint.parent / "target.npy"
+    if candidate.exists():
+        return np.load(candidate)
+    if not target or target == "unknown":
+        return None
+    try:
+        return prepare_targets([target], max_size=max_size, padding=padding).numpy()
+    except (OSError, ValueError) as exc:  # offline cache miss, unknown spec, ...
+        print(f"  no target.npy and {target!r} could not be reloaded ({exc}); skipping target.png")
+        return None
 
 
 def _update_manifest(out_dir: Path, entry: dict) -> None:
@@ -292,76 +278,62 @@ def _update_manifest(out_dir: Path, entry: dict) -> None:
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
 
-def _save_weights(ca: NeuralCA, model_dir: Path) -> dict:
+def reindex(out_dir: Path) -> list[dict]:
+    """Rebuild ``manifest.json`` from ``exports/*/meta.json``.
+
+    ``meta.json`` is the source of truth and the manifest is a cache of it, so the
+    manifest can always be regenerated: that is what makes the append-only
+    ``_update_manifest`` crash-safe and what removes manifest/meta drift after a
+    re-export or a manual edit.
+    """
+    out_dir = Path(out_dir)
+    models: list[dict] = []
+    for meta_path in sorted(out_dir.glob("*/meta.json")):
+        meta = json.loads(meta_path.read_text())
+        model_id = meta.get("id") or meta_path.parent.name
+        models.append({"id": model_id, "path": f"{model_id}/model.onnx", "meta": meta})
+    manifest = {
+        "version": 1,
+        "models": sorted(models, key=lambda m: m["id"]),
+        "generated": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+    return manifest["models"]
+
+
+def _save_weights(ca: NeuralCA, model_dir: Path, spec: ModelSpec) -> dict:
     """Dump the update-rule MLP as a flat float32 blob for the WGSL engine.
 
-    Layout in floats, for ``L`` hidden layers:
-
-        W1 [hidden, P4], b1 [hidden],
-        (W_i [hidden, hidden], b_i [hidden]) for i = 2..L,   # only when L > 1
-        W_out [C, hidden], b_out [C]
-
-    row-major, matching ``ca.update``. ``P4`` is the logical perception width
-    (``3C + cond_n``) rounded up to a multiple of 4 so the shader can read ``W1``
-    rows as ``vec4`` (zero padding columns are added when it is not a multiple of
-    4). The intermediate matrices need no padding: their rows are ``hidden`` wide
-    and the shader requires ``hidden % 4 == 0``.
-    For the paper size (``C=16``, one hidden layer) the layout is unchanged.
+    The layout is owned by ``ModelSpec.weight_offsets()`` (see there for the block
+    order). The only transformation applied here is padding each ``W1`` row from
+    ``perception_n`` to ``perception_padded_n`` so the shader can read rows as
+    ``vec4``. At ``C=16`` without conditioning that pad is a no-op, so existing
+    blobs stay byte-identical.
     """
-    C = int(ca.channel_n)
-    cond_n = int(ca.cond_n)
-    layers = int(getattr(ca, "hidden_layers", 1))
-    p = 3 * C + cond_n  # perception width fed to update[0]
-    w1 = ca.update[0].weight.detach().reshape(ca.update[0].out_channels, p)
-    b1 = ca.update[0].bias.detach().reshape(-1)
-    out = ca.update[-1]
-    w2 = out.weight.detach().reshape(out.out_channels, -1)
-    b2 = out.bias.detach().reshape(-1)
-    w1 = w1.cpu().numpy().astype("<f4")
-    b1 = b1.cpu().numpy().astype("<f4")
-    w2 = w2.cpu().numpy().astype("<f4")
-    b2 = b2.cpu().numpy().astype("<f4")
+    h, p, p4 = spec.hidden_n, spec.perception_n, spec.perception_padded_n
 
-    p4 = (p + 3) // 4 * 4  # pad each perception row to a vec4 boundary
+    def f32(t: torch.Tensor) -> np.ndarray:
+        return t.detach().reshape(-1).cpu().numpy().astype("<f4")
+
+    w1 = ca.update[0].weight.detach().reshape(h, p).cpu().numpy().astype("<f4")
     if p4 != p:
         w1 = np.pad(w1, ((0, 0), (0, p4 - p)))
-    hidden = int(w1.shape[0])
-
-    # Intermediate hidden -> hidden blocks, in update order (conv 2..layers).
-    mids: list[np.ndarray] = []
-    for li in range(1, layers):
-        conv = ca.update[2 * li]
-        mids.append(
-            conv.weight.detach().reshape(hidden, hidden).cpu().numpy().astype("<f4")
-        )
-        mids.append(conv.bias.detach().reshape(-1).cpu().numpy().astype("<f4"))
-
-    off = {"w1": 0, "b1": int(w1.size)}
-    cursor = int(w1.size + b1.size)
-    parts: list[np.ndarray] = [w1.reshape(-1), b1]
-    if mids:
-        # One block per intermediate layer: W (hidden*hidden) then b (hidden).
-        off["wmid"] = cursor
-        off["bmid"] = cursor + hidden * hidden
-        off["mid_stride"] = hidden * hidden + hidden
-        parts.extend(m.reshape(-1) for m in mids)
-        cursor += off["mid_stride"] * (layers - 1)
-    off["w2"] = cursor
-    off["b2"] = cursor + int(w2.size)
-    parts.extend([w2.reshape(-1), b2])
+    parts: list[np.ndarray] = [w1.reshape(-1), f32(ca.update[0].bias)]
+    # Intermediate hidden -> hidden blocks, in update order (conv 2..hidden_layers).
+    for li in range(1, spec.hidden_layers):
+        parts.append(f32(ca.update[2 * li].weight))
+        parts.append(f32(ca.update[2 * li].bias))
+    parts.append(f32(ca.update[-1].weight))
+    parts.append(f32(ca.update[-1].bias))
 
     blob = np.concatenate(parts)
+    if blob.size != spec.weights_count():
+        raise RuntimeError(
+            f"weights.bin layout mismatch: {blob.size} floats written, spec says "
+            f"{spec.weights_count()} (offsets {spec.weight_offsets()})"
+        )
     (model_dir / "weights.bin").write_bytes(blob.tobytes())
-    return {
-        "file": "weights.bin",
-        "channel_n": C,
-        "hidden_n": hidden,
-        "hidden_layers": layers,
-        "perception_n": p,
-        "perception_padded_n": p4,
-        "offsets": off,
-        "count": int(blob.size),
-    }
+    return spec.weights_meta()
 
 
 def export_one(
@@ -377,6 +349,8 @@ def export_one(
     verify_steps: int,
     wrap: bool = True,
     targets: list[str] | None = None,
+    max_size: int = 40,
+    padding: int = 16,
 ) -> dict:
     import onnx
     import onnxruntime as ort
@@ -387,13 +361,27 @@ def export_one(
     model_dir.mkdir(parents=True, exist_ok=True)
 
     ca = _load_ca(checkpoint, wrap=wrap)
-    target_arr = _find_target(checkpoint)
+    spec = ca.spec
+    if spec.num_parameters() != ca.num_parameters:
+        raise RuntimeError(
+            f"{model_id}: ModelSpec accounts for {spec.num_parameters()} parameters "
+            f"but the module has {ca.num_parameters}. nca/spec.py is out of date with "
+            f"nca/model.py (a new layer or parameter was added)."
+        )
+    target_arr = _find_target(checkpoint, target, max_size, padding)
     if grid is None:
         grid = int(target_arr.shape[-1]) if target_arr is not None else 64
 
     onnx_path = model_dir / "model.onnx"
     print(f"Exporting {model_id} (grid {grid}, dynamic={dynamic}, opset {opset})")
-    export_step(ca, onnx_path, grid, dynamic=dynamic, opset=opset, cond_n=ca.cond_n)
+    export_step(
+        ca,
+        onnx_path,
+        grid,
+        dynamic=dynamic,
+        opset=opset,
+        cond_n=spec.cond_n,
+    )
 
     parity = None
     if do_verify:
@@ -402,27 +390,32 @@ def export_one(
     if target_arr is not None:
         save_image(render(torch.from_numpy(target_arr))[0], model_dir / "target.png")
 
-    weight_layout = _save_weights(ca, model_dir)
+    weight_layout = _save_weights(ca, model_dir, spec)
 
     model_proto = onnx.load(str(onnx_path))
     meta = {
         "id": model_id,
         "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "channel_n": ca.channel_n,
-        "cond_n": int(ca.cond_n),
-        # 1 = the paper's single hidden block. The WGSL step only implements 1.
-        "hidden_layers": int(getattr(ca, "hidden_layers", 1)),
-        "hidden_n": infer_dims(ca.state_dict())[1],
-        "fire_rate": ca.fire_rate,
-        "learn_perception": bool(getattr(ca, "learn_perception", False)),
+        "channel_n": spec.channel_n,
+        "cond_n": spec.cond_n,
+        # 1 = the paper's single hidden block. The WGSL step implements 1..n.
+        "hidden_layers": spec.hidden_layers,
+        "hidden_n": spec.hidden_n,
+        "fire_rate": spec.fire_rate,
+        "learn_perception": spec.learn_perception,
         # The [3,3,3] (identity, d/dx, d/dy) kernels in use, flattened. For a
         # --learn-perception model these are the trained ones, so the frontend
         # must use them (and not the canonical Sobel).
         "perception_kernel": [round(float(v), 8) for v in ca.kernels().reshape(-1)],
-        "num_parameters": ca.num_parameters,
+        "num_parameters": spec.num_parameters(),
         "grid": grid,
         "dynamic_shape": dynamic,
-        "wrap": wrap,
+        # How the target was placed on the grid: grid == target_size + 2*padding.
+        # Recorded so target.png (and a future re-export) can be reproduced from
+        # the meta alone -- 9 of the capacity-sweep runs predate target.npy.
+        "target_size": max_size,
+        "padding": padding,
+        "wrap": spec.wrap,
         "opset": opset,
         "experiment": experiment,
         "target": target,
@@ -450,11 +443,92 @@ def export_one(
     return meta
 
 
+def export_all(
+    out_dir: Path,
+    *,
+    opset: int = DEFAULT_OPSET,
+    do_verify: bool = True,
+    verify_steps: int = 8,
+    only: list[str] | None = None,
+) -> list[dict]:
+    """Re-export every model in ``out_dir`` that still has its source checkpoint.
+
+    Grid / dynamic shape / experiment / target are taken from the existing
+    ``meta.json`` so a re-export reproduces the same artefacts from the
+    checkpoint. This is the command to run after any change to ``nca/model.py``
+    or ``nca/export.py``; it then rewrites ``manifest.json`` via ``reindex`` so the
+    manifest cannot drift.
+    """
+    out_dir = Path(out_dir)
+    wanted = set(only) if only else None
+    exported: list[dict] = []
+    skipped: list[tuple[str, str]] = []
+
+    for meta_path in sorted(out_dir.glob("*/meta.json")):
+        meta = json.loads(meta_path.read_text())
+        model_id = meta.get("id") or meta_path.parent.name
+        if wanted is not None and model_id not in wanted:
+            continue
+        checkpoint = Path(meta.get("source_checkpoint") or "")
+        if not checkpoint.is_file():
+            skipped.append((model_id, str(checkpoint)))
+            continue
+        spec = ModelSpec.from_meta(meta)
+        exported.append(
+            export_one(
+                checkpoint=checkpoint,
+                model_id=model_id,
+                out_dir=out_dir,
+                grid=int(meta["grid"]) if meta.get("grid") else None,
+                dynamic=bool(meta.get("dynamic_shape", True)),
+                opset=opset,
+                experiment=meta.get("experiment", "unknown"),
+                target=meta.get("target", "unknown"),
+                do_verify=do_verify,
+                verify_steps=verify_steps,
+                wrap=spec.wrap,
+                targets=meta.get("targets"),
+                max_size=int(meta.get("target_size", 40)),
+                padding=int(meta.get("padding", 16)),
+            )
+        )
+
+    if skipped:
+        print(f"\nSkipped {len(skipped)} model(s) whose source checkpoint is gone:")
+        for model_id, path in skipped:
+            print(f"  {model_id}: {path or '(not recorded)'}")
+
+    reindex(out_dir)
+    print(f"\nExported {len(exported)} model(s) into {out_dir}")
+    return exported
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Export a trained NCA to ONNX.")
-    p.add_argument("--checkpoint", required=True, help="path to a .pt checkpoint")
+    p.add_argument(
+        "--checkpoint",
+        default=None,
+        help="path to a .pt checkpoint (required unless --all/--reindex)",
+    )
     p.add_argument("--id", default=None, help="model id (default: run dir name)")
     p.add_argument("--out", default="exports", help="output directory")
+    p.add_argument(
+        "--all",
+        action="store_true",
+        help="re-export every model in --out whose source checkpoint still exists",
+    )
+    p.add_argument(
+        "--only",
+        nargs="+",
+        metavar="ID",
+        default=None,
+        help="with --all: restrict to these model ids",
+    )
+    p.add_argument(
+        "--reindex",
+        action="store_true",
+        help="rebuild manifest.json from */meta.json and exit",
+    )
     p.add_argument("--grid-size", type=int, default=None, help="dummy grid size")
     p.add_argument(
         "--static",
@@ -472,6 +546,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="target spec list for a conditional model (metadata only)",
     )
     p.add_argument(
+        "--target-size",
+        type=int,
+        default=40,
+        help="target canvas this run was trained with (only used when the run has "
+        "no target.npy and --target has to be reloaded for target.png)",
+    )
+    p.add_argument(
+        "--padding",
+        type=int,
+        default=16,
+        help="border this run was trained with; grid == target-size + 2*padding",
+    )
+    p.add_argument(
         "--no-wrap",
         action="store_true",
         help="use zero (non-periodic) boundaries instead of circular wrapping",
@@ -482,7 +569,26 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> None:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    if args.reindex:
+        models = reindex(Path(args.out))
+        print(f"Reindexed {len(models)} model(s) into {Path(args.out) / 'manifest.json'}")
+        return
+
+    if args.all:
+        export_all(
+            Path(args.out),
+            opset=args.opset,
+            do_verify=not args.no_verify,
+            verify_steps=args.verify_steps,
+            only=args.only,
+        )
+        return
+
+    if not args.checkpoint:
+        parser.error("--checkpoint is required unless --all or --reindex is given")
     checkpoint = Path(args.checkpoint)
     model_id = args.id or checkpoint.parent.name or checkpoint.stem
 
@@ -499,6 +605,8 @@ def main(argv: list[str] | None = None) -> None:
         verify_steps=args.verify_steps,
         wrap=not args.no_wrap,
         targets=args.targets,
+        max_size=args.target_size,
+        padding=args.padding,
     )
 
 

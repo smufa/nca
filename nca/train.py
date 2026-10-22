@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import random
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -48,7 +48,6 @@ class TrainConfig:
     gif_scale: int = 3
     make_gif: bool = True
     seed: int = 0
-    compile: bool = False
     amp: str = "off"  # off | bf16
 
 
@@ -150,10 +149,36 @@ def train(
     device: torch.device,
     out_dir: Path,
     resume: str | Path | None = None,
+    provenance: dict | None = None,
 ) -> list[float]:
-    """Train ``ca`` in place and return the loss history."""
+    """Train ``ca`` in place and return the loss history.
+
+    ``provenance`` is free-form metadata recorded next to the run (``train.json``)
+    -- the CLI passes the target spec(s) / experiment name so a run directory is
+    self-describing without having to read the shell history.
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Record what this run *is* before any training happens, so a crashed or
+    # still-running job is already loadable by `nca.sample --run <dir>` and
+    # re-exportable without the caller remembering the flags.
+    spec = ca.spec
+    spec.save(out_dir / "spec.json")
+    (out_dir / "train.json").write_text(
+        json.dumps(
+            {
+                **(provenance or {}),
+                "config": asdict(cfg),
+                "spec": asdict(spec),
+                "device": str(device),
+                "torch_version": torch.__version__,
+                "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
     random.seed(cfg.seed)
     np.random.seed(cfg.seed)
@@ -170,28 +195,18 @@ def train(
 
     ca.to(device)
 
-    # The unroll is ~80 sequential steps, so the per-call dispatch overhead
-    # dominates. Compiling the *whole sequence* (not just the module) turns it
-    # into one graph. The loop bound comes from the mask tensor, so this is
-    # specialised per unroll length.
-    if cfg.compile:
-
-        @torch.compile(dynamic=False)
-        def forward(
-            x: torch.Tensor, masks: torch.Tensor, cond: torch.Tensor | None
-        ) -> torch.Tensor:
-            for k in range(masks.shape[0]):
-                x = ca(x, update_mask=masks[k], cond=cond)
-            return x
-
-    else:
-
-        def forward(
-            x: torch.Tensor, masks: torch.Tensor, cond: torch.Tensor | None
-        ) -> torch.Tensor:
-            for k in range(masks.shape[0]):
-                x = ca(x, update_mask=masks[k], cond=cond)
-            return x
+    # The unroll is ~80 sequential steps but it is throughput-bound, not
+    # latency-bound: time is linear in batch size, so there is nothing to fuse
+    # away. `torch.compile` measured neutral-to-slower here (compiling the whole
+    # sequence pays a warmup and is specialised per unroll length) - see
+    # docs/findings/training-perf.md. `scripts/profile_train.py --compile`
+    # re-measures it if the assumption ever needs revisiting.
+    def forward(
+        x: torch.Tensor, masks: torch.Tensor, cond: torch.Tensor | None
+    ) -> torch.Tensor:
+        for k in range(masks.shape[0]):
+            x = ca(x, update_mask=masks[k], cond=cond)
+        return x
     target = target.to(device)
     seed = seed.to(device)
     _, h, w = seed.shape
@@ -279,6 +294,12 @@ def train(
             idx, x0, cond = pool.sample(cfg.batch_size, generator)
             if cond is not None:
                 tgt = target[cond.argmax(dim=1)]
+            else:
+                # Non-conditional run: every slot wants the same target. Expand it
+                # to a per-sample tensor so the ranking / mismatch code below can
+                # index it (tgt[rank]) -- relying on broadcast silently breaks the
+                # moment batch_size > 1.
+                tgt = target.expand(cfg.batch_size, *target.shape[1:])
             with torch.no_grad():
                 rank = per_sample_loss(x0, tgt).argsort(descending=True)
             x0 = x0[rank]

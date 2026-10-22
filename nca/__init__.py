@@ -6,11 +6,15 @@ State tensors use the channels-first layout ``[B, C, H, W]``.
 
 from .model import NeuralCA, get_living_mask
 from .pool import SamplePool
+from .spec import ModelSpec, find_checkpoint, load_model_state
 from .targets import load_target, make_seed, prepare_target
 
 __all__ = [
     "NeuralCA",
+    "ModelSpec",
     "get_living_mask",
+    "find_checkpoint",
+    "load_model_state",
     "SamplePool",
     "load_target",
     "make_seed",

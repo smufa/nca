@@ -13,6 +13,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .spec import ModelSpec
+
 ALPHA_CHANNEL = 3
 ALIVE_THRESHOLD = 0.1
 
@@ -145,6 +147,24 @@ class NeuralCA(nn.Module):
     @property
     def num_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters())
+
+    @classmethod
+    def from_spec(cls, spec: "ModelSpec") -> "NeuralCA":
+        """Build the module described by a :class:`nca.spec.ModelSpec`."""
+        return cls(
+            channel_n=spec.channel_n,
+            fire_rate=spec.fire_rate,
+            hidden_n=spec.hidden_n,
+            wrap=spec.wrap,
+            learn_perception=spec.learn_perception,
+            cond_n=spec.cond_n,
+            hidden_layers=spec.hidden_layers,
+        )
+
+    @property
+    def spec(self) -> "ModelSpec":
+        """The shape of this module, as a :class:`nca.spec.ModelSpec`."""
+        return ModelSpec.from_model(self)
 
     def kernels(self, angle: float = 0.0) -> torch.Tensor:
         """The ``[3,3,3]`` ``(identity, d/dx, d/dy)`` kernels currently in use.
