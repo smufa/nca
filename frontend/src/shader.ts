@@ -100,6 +100,9 @@ export class ShaderRunner implements CaEngine {
   }
 
   static async create(model: ManifestModel, seed = 1): Promise<ShaderRunner> {
+    if (!ShaderRunner.supports(model)) {
+      throw new Error('shader engine unsupported for this model size');
+    }
     const adapter = await navigator.gpu.requestAdapter({
       powerPreference: 'high-performance',
     });
@@ -121,6 +124,13 @@ export class ShaderRunner implements CaEngine {
     return runner;
   }
 
+  /** The WGSL kernel assumes at most 16 channels and a multiple-of-4 hidden. */
+  static supports(model: ManifestModel): boolean {
+    const C = model.meta.channel_n;
+    const h = model.meta.weights.hidden_n;
+    return C >= 4 && C <= 16 && h > 0 && h % 4 === 0;
+  }
+
   get mode(): string {
     return 'shader';
   }
@@ -131,13 +141,26 @@ export class ShaderRunner implements CaEngine {
 
   private init(): void {
     const d = this.device;
+    // Size-dependent constants are pipeline overrides so naga keeps the MLP
+    // loops unrolled (dynamic bounds cost ~1.9x).
+    const C = this.channelN;
+    const w1s4 = Math.ceil((3 * C) / 4);
+    const constants = { C, NP4: w1s4, W1S4: w1s4, HG: this.hidden / 4 };
     this.pipeline1 = d.createComputePipeline({
       layout: 'auto',
-      compute: { module: d.createShaderModule({ code: PASS1 }), entryPoint: 'main' },
+      compute: {
+        module: d.createShaderModule({ code: PASS1 }),
+        entryPoint: 'main',
+        constants,
+      },
     });
     this.pipeline2 = d.createComputePipeline({
       layout: 'auto',
-      compute: { module: d.createShaderModule({ code: PASS2 }), entryPoint: 'main' },
+      compute: {
+        module: d.createShaderModule({ code: PASS2 }),
+        entryPoint: 'main',
+        constants: { C },
+      },
     });
     this.brushPipeline = d.createComputePipeline({
       layout: 'auto',
@@ -440,6 +463,7 @@ export class ShaderRunner implements CaEngine {
     u[5] = op === 'one' ? 0 : op === 'zero' ? 1 : 2;
     new Float32Array(buf, 24, 1)[0] = factor;
     u[7] = mask >>> 0;
+    u[8] = this.channelN;
     this.device.queue.writeBuffer(this.brushUniform, 0, buf);
 
     const enc = this.device.createCommandEncoder();

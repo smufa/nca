@@ -1,3 +1,15 @@
+// Perception + update-rule step.
+//
+// C, NP4, W1S4 and HG are pipeline-overridable constants (set from the model's
+// channel count / hidden width at pipeline creation). They MUST stay compile-time
+// constants: with dynamic bounds naga can no longer unroll the MLP loops and the
+// step becomes ~1.9x slower. Defaults are the paper size (C=16, hidden=128).
+
+override C: u32 = 16u;     // state channels
+override NP4: u32 = 12u;   // ceil(3C / 4): vec4 groups in the padded perception
+override W1S4: u32 = 12u;  // vec4 stride of one W1 row (== NP4)
+override HG: u32 = 32u;    // hidden groups: hidden / 4
+
 struct Params {
   C: u32, H: u32, W: u32, hidden: u32,
   w1: u32, b1: u32, w2: u32, b2: u32,
@@ -19,8 +31,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let y = gid.y;
   if (x >= p.W || y >= p.H) { return; }
 
+  // 48 = 3 * 16 is the largest perception (C <= 16). Only the padded tail of the
+  // last vec4 group is zeroed; for C=16 (3C == NP4*4) this loop is empty.
   var perc: array<f32, 48>;
-  for (var c: u32 = 0u; c < 16u; c = c + 1u) {
+  for (var i: u32 = 3u * C; i < 4u * NP4; i = i + 1u) { perc[i] = 0.0; }
+  for (var c: u32 = 0u; c < C; c = c + 1u) {
     var ki = 0.0;
     var kx = 0.0;
     var ky = 0.0;
@@ -41,25 +56,25 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
 
   var perc4: array<vec4<f32>, 12>;
-  for (var k: u32 = 0u; k < 12u; k = k + 1u) {
+  for (var k: u32 = 0u; k < NP4; k = k + 1u) {
     let b = k * 4u;
     perc4[k] = vec4<f32>(perc[b], perc[b + 1u], perc[b + 2u], perc[b + 3u]);
   }
 
   // four hidden units at a time: vec4 loads for both weight matrices
   var dxv: array<f32, 16>;
-  for (var c: u32 = 0u; c < 16u; c = c + 1u) { dxv[c] = weights[p.b2 + c]; }
+  for (var c: u32 = 0u; c < C; c = c + 1u) { dxv[c] = weights[p.b2 + c]; }
   let w2v = p.w2 / 4u;
-  for (var jg: u32 = 0u; jg < 32u; jg = jg + 1u) {
+  for (var jg: u32 = 0u; jg < HG; jg = jg + 1u) {
     var acc = vec4<f32>(0.0);
-    let base = jg * 48u;
-    for (var k: u32 = 0u; k < 12u; k = k + 1u) {
+    let base = jg * 4u * W1S4;
+    for (var k: u32 = 0u; k < NP4; k = k + 1u) {
       let pv = perc4[k];
       acc = acc + vec4<f32>(
         dot(w4[base + k], pv),
-        dot(w4[base + 12u + k], pv),
-        dot(w4[base + 24u + k], pv),
-        dot(w4[base + 36u + k], pv),
+        dot(w4[base + W1S4 + k], pv),
+        dot(w4[base + 2u * W1S4 + k], pv),
+        dot(w4[base + 3u * W1S4 + k], pv),
       );
     }
     let hs = max(
@@ -68,13 +83,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         weights[p.b1 + jg * 4u + 2u], weights[p.b1 + jg * 4u + 3u]),
       vec4<f32>(0.0),
     );
-    for (var c: u32 = 0u; c < 16u; c = c + 1u) {
-      dxv[c] = dxv[c] + dot(w4[w2v + c * 32u + jg], hs);
+    for (var c: u32 = 0u; c < C; c = c + 1u) {
+      dxv[c] = dxv[c] + dot(w4[w2v + c * HG + jg], hs);
     }
   }
 
   let f = fire[y * p.W + x];
-  for (var c: u32 = 0u; c < 16u; c = c + 1u) {
+  for (var c: u32 = 0u; c < C; c = c + 1u) {
     out[sidx(c, y, x)] = state[sidx(c, y, x)] + dxv[c] * f * p.step;
   }
 }

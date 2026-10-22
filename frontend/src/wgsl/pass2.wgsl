@@ -1,3 +1,6 @@
+// Living-cell mask (alpha = channel 3).
+override C: u32 = 16u;
+
 struct Params {
   C: u32, H: u32, W: u32, hidden: u32,
   w1: u32, b1: u32, w2: u32, b2: u32,
@@ -27,7 +30,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   var alive = 0.0;
   if (pre > 0.1 && post > 0.1) { alive = 1.0; }
-  for (var c: u32 = 0u; c < 16u; c = c + 1u) {
+  for (var c: u32 = 0u; c < C; c = c + 1u) {
     next[sidx(c, y, x)] = tmp[sidx(c, y, x)] * alive;
   }
 }

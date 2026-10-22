@@ -21,6 +21,8 @@ export interface ModelMeta {
     file: string;
     channel_n: number;
     hidden_n: number;
+    perception_n?: number;
+    perception_padded_n?: number;
     offsets: { w1: number; b1: number; w2: number; b2: number };
     count: number;
   };

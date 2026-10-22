@@ -580,9 +580,13 @@ async function selectModel(model: ManifestModel): Promise<void> {
     runner = null;
   }
   prevPerf = { maskMs: 0, runMs: 0, syncMs: 0, steps: 0 };
+  let shaderFallback = false;
   try {
-    runner =
-      ep === 'shader'
+    const shaderOk = ep !== 'shader' || ShaderRunner.supports(model);
+    shaderFallback = !shaderOk;
+    runner = !shaderOk
+      ? await CaRunner.create(model, 'wasm')
+      : ep === 'shader'
         ? await ShaderRunner.create(model)
         : await CaRunner.create(model, ep);
   } catch (e) {
@@ -597,7 +601,11 @@ async function selectModel(model: ManifestModel): Promise<void> {
   updateInfo();
   const label =
     runner.mode === 'gpu' ? 'WebGPU' : runner.mode === 'shader' ? 'WebGPU shader' : 'WASM';
-  setStatus(`ready · ${label}`, 'ok');
+  if (shaderFallback) {
+    setStatus(`ready · ${label} (shader unsupported for this model size)`, 'warn');
+  } else {
+    setStatus(`ready · ${label}`, 'ok');
+  }
 }
 
 async function loadModels(): Promise<void> {

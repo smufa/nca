@@ -222,19 +222,36 @@ def _update_manifest(out_dir: Path, entry: dict) -> None:
 def _save_weights(ca: NeuralCA, model_dir: Path) -> dict:
     """Dump the update-rule MLP as a flat float32 blob for the WGSL engine.
 
-    Layout in floats: ``W1 [hidden, 3C]``, ``b1 [hidden]``, ``W2 [C, hidden]``,
-    ``b2 [C]`` - row-major, matching ``ca.update``.
+    Layout in floats: ``W1 [hidden, P4]``, ``b1 [hidden]``, ``W2 [C, hidden]``,
+    ``b2 [C]`` - row-major, matching ``ca.update``. ``P4`` is the logical
+    perception width ``3C`` rounded up to a multiple of 4 so the shader can read
+    ``W1`` rows as ``vec4`` (zero padding columns are added when ``3C % 4``).
+    For the paper size (``C=16``) ``P4 == 3C == 48`` so the layout is unchanged.
     """
-    w1 = ca.update[0].weight.detach().reshape(-1).cpu().numpy().astype("<f4")
-    b1 = ca.update[0].bias.detach().reshape(-1).cpu().numpy().astype("<f4")
-    w2 = ca.update[2].weight.detach().reshape(-1).cpu().numpy().astype("<f4")
-    b2 = ca.update[2].bias.detach().reshape(-1).cpu().numpy().astype("<f4")
-    blob = np.concatenate([w1, b1, w2, b2])
+    C = int(ca.channel_n)
+    w1 = ca.update[0].weight.detach().reshape(ca.update[0].out_channels, 3 * C)
+    b1 = ca.update[0].bias.detach().reshape(-1)
+    w2 = ca.update[2].weight.detach().reshape(ca.update[2].out_channels, -1)
+    b2 = ca.update[2].bias.detach().reshape(-1)
+    w1 = w1.cpu().numpy().astype("<f4")
+    b1 = b1.cpu().numpy().astype("<f4")
+    w2 = w2.cpu().numpy().astype("<f4")
+    b2 = b2.cpu().numpy().astype("<f4")
+
+    p = 3 * C
+    p4 = (p + 3) // 4 * 4  # pad each perception row to a vec4 boundary
+    if p4 != p:
+        w1 = np.pad(w1, ((0, 0), (0, p4 - p)))
+    hidden = int(w1.shape[0])
+
+    blob = np.concatenate([w1.reshape(-1), b1, w2.reshape(-1), b2])
     (model_dir / "weights.bin").write_bytes(blob.tobytes())
     return {
         "file": "weights.bin",
-        "channel_n": int(ca.channel_n),
-        "hidden_n": int(w1.size // (3 * ca.channel_n)),
+        "channel_n": C,
+        "hidden_n": hidden,
+        "perception_n": p,
+        "perception_padded_n": p4,
         "offsets": {
             "w1": 0,
             "b1": int(w1.size),
