@@ -140,7 +140,9 @@ export class ShaderRunner implements CaEngine {
     const C = model.meta.channel_n;
     const h = model.meta.weights.hidden_n;
     const condN = model.meta.cond_n ?? 0;
-    return C >= 4 && C <= 16 && h > 0 && h % 4 === 0 && condN <= 16;
+    // The WGSL step implements a single hidden layer (one W1/W2 pair).
+    const layers = model.meta.hidden_layers ?? 1;
+    return C >= 4 && C <= 16 && h > 0 && h % 4 === 0 && condN <= 16 && layers === 1;
   }
 
   get mode(): string {

@@ -95,6 +95,7 @@ class NeuralCA(nn.Module):
         wrap: bool = True,
         learn_perception: bool = False,
         cond_n: int = 0,
+        hidden_layers: int = 1,
     ) -> None:
         super().__init__()
         self.channel_n = channel_n
@@ -106,18 +107,25 @@ class NeuralCA(nn.Module):
         # target to grow. It is a separate signal, not part of the state, so the
         # living mask cannot zero it away.
         self.cond_n = cond_n
+        self.hidden_layers = hidden_layers
 
         # Perception output has 3 * channel_n channels (+ cond_n for a conditional
         # model); the update rule is a small MLP per cell via 1x1 convolutions.
-        self.update = nn.Sequential(
+        # hidden_layers counts the hidden (ReLU) blocks, so 1 is the paper shape and
+        # 2 adds a hidden -> hidden projection.
+        layers: list[nn.Module] = [
             nn.Conv2d(3 * channel_n + cond_n, hidden_n, kernel_size=1),
             nn.ReLU(),
-            nn.Conv2d(hidden_n, channel_n, kernel_size=1),
-        )
+        ]
+        for _ in range(max(hidden_layers - 1, 0)):
+            layers += [nn.Conv2d(hidden_n, hidden_n, kernel_size=1), nn.ReLU()]
+        layers += [nn.Conv2d(hidden_n, channel_n, kernel_size=1)]
+        self.update = nn.Sequential(*layers)
+
         # "Do-nothing" initialisation: the final layer starts at zero so the
         # CA initially leaves the state untouched.
-        nn.init.zeros_(self.update[2].weight)
-        nn.init.zeros_(self.update[2].bias)
+        nn.init.zeros_(self.update[-1].weight)
+        nn.init.zeros_(self.update[-1].bias)
 
         if learn_perception:
             # Learning the perception means learning dx/dy; the identity kernel is

@@ -10,6 +10,8 @@ export interface ModelMeta {
   perception_kernel?: number[];
   /** >0 for a conditional model: the one-hot selector width. */
   cond_n?: number;
+  /** Hidden (ReLU) blocks in the update rule; the WGSL step implements 1. */
+  hidden_layers?: number;
   /** Target spec per selector index (conditional models). */
   targets?: string[];
   num_parameters: number;

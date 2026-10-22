@@ -93,6 +93,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     p.add_argument("--channels", type=int, default=16, help="number of state channels")
     p.add_argument("--hidden", type=int, default=128, help="update-rule hidden width")
+    p.add_argument(
+        "--hidden-layers",
+        type=int,
+        default=1,
+        help="hidden (ReLU) blocks in the update rule; 2 adds a hidden->hidden layer",
+    )
     p.add_argument("--fire-rate", type=float, default=0.5)
     p.add_argument(
         "--learn-perception",
@@ -238,6 +244,7 @@ def main(argv: list[str] | None = None) -> None:
         wrap=not args.no_wrap,
         learn_perception=args.learn_perception,
         cond_n=cond_n,
+        hidden_layers=args.hidden_layers,
     )
 
     print(f"Targets: {', '.join(specs)}  ({args.target_size}px, padded to {h}x{w})")

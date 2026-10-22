@@ -76,15 +76,37 @@ def infer_dims(state_dict: dict) -> tuple[int, int]:
     from the *output* projection, not from the first layer's fan-in.
     """
     hidden_n = state_dict["update.0.weight"].shape[0]
-    channel_n = state_dict["update.2.weight"].shape[0]
+    channel_n = state_dict[f"update.{_last_layer_index(state_dict)}.weight"].shape[0]
     return int(channel_n), int(hidden_n)
+
+
+def _last_layer_index(state_dict: dict) -> int:
+    """Index of the final ``update.N`` in the state dict (the output projection)."""
+    idx = [
+        int(k.split(".")[1])
+        for k in state_dict
+        if k.startswith("update.") and k.endswith(".weight")
+    ]
+    if not idx:
+        raise ValueError("no update.* weights in checkpoint")
+    return max(idx)
+
+
+def _hidden_layers(state_dict: dict) -> int:
+    """Number of hidden (ReLU) blocks: convs minus the output projection."""
+    n_convs = sum(
+        1
+        for k in state_dict
+        if k.startswith("update.") and k.endswith(".weight")
+    )
+    return max(n_convs - 1, 1)
 
 
 def _load_ca(checkpoint: str | Path, wrap: bool = True) -> NeuralCA:
     state = torch.load(checkpoint, map_location="cpu")
     channel_n, hidden_n = infer_dims(state)
     # A --learn-perception checkpoint carries the `sobel` parameter; a conditional
-    # one has a wider update.0 fan-in than 3C.
+    # one has a wider update.0 fan-in than 3C; a deeper one has more convs.
     cond_n = int(state["update.0.weight"].shape[1]) - 3 * channel_n
     if cond_n < 0:  # pragma: no cover - defensive
         raise ValueError(f"bad update.0 fan-in for channel_n={channel_n}")
@@ -94,6 +116,7 @@ def _load_ca(checkpoint: str | Path, wrap: bool = True) -> NeuralCA:
         wrap=wrap,
         learn_perception="sobel" in state,
         cond_n=cond_n,
+        hidden_layers=_hidden_layers(state),
     )
     ca.load_state_dict(state)
     ca.eval()
@@ -284,8 +307,9 @@ def _save_weights(ca: NeuralCA, model_dir: Path) -> dict:
     p = 3 * C + cond_n  # perception width fed to update[0]
     w1 = ca.update[0].weight.detach().reshape(ca.update[0].out_channels, p)
     b1 = ca.update[0].bias.detach().reshape(-1)
-    w2 = ca.update[2].weight.detach().reshape(ca.update[2].out_channels, -1)
-    b2 = ca.update[2].bias.detach().reshape(-1)
+    out = ca.update[-1]
+    w2 = out.weight.detach().reshape(out.out_channels, -1)
+    b2 = out.bias.detach().reshape(-1)
     w1 = w1.cpu().numpy().astype("<f4")
     b1 = b1.cpu().numpy().astype("<f4")
     w2 = w2.cpu().numpy().astype("<f4")
@@ -360,6 +384,8 @@ def export_one(
         "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "channel_n": ca.channel_n,
         "cond_n": int(ca.cond_n),
+        # 1 = the paper's single hidden block. The WGSL step only implements 1.
+        "hidden_layers": int(getattr(ca, "hidden_layers", 1)),
         "hidden_n": infer_dims(ca.state_dict())[1],
         "fire_rate": ca.fire_rate,
         "learn_perception": bool(getattr(ca, "learn_perception", False)),
