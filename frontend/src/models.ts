@@ -6,6 +6,8 @@ export interface ModelMeta {
   channel_n: number;
   hidden_n: number;
   fire_rate: number;
+  learn_perception?: boolean;
+  perception_kernel?: number[];
   num_parameters: number;
   grid: number;
   dynamic_shape: boolean;

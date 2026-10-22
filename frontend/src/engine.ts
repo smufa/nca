@@ -30,6 +30,8 @@ export interface CaEngine {
   edit(fn: (x: Float32Array) => void): void;
   setGrid(size: number): void;
   setKernels(ident: number[], dx: number[], dy: number[]): void;
+  /** The perception kernels the engine is currently using. */
+  getKernels(): number[][];
   dispose(): Promise<void>;
 
   /**

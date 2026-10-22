@@ -44,6 +44,17 @@ export function perceptionWeight(channelN: number): Float32Array {
 }
 
 /**
+ * The perception kernels for a model: the trained ones from `meta` when present
+ * (a `--learn-perception` run), otherwise the canonical Sobel basis. Stored
+ * flattened as 27 numbers, `[identity, dx, dy]`.
+ */
+export function modelKernels(meta: { perception_kernel?: number[] }): number[][] {
+  const flat = meta.perception_kernel;
+  if (!flat || flat.length !== 27) return CANONICAL_KERNELS.map((k) => k.slice());
+  return [0, 1, 2].map((m) => Array.from(flat.slice(m * 9, m * 9 + 9)));
+}
+
+/**
  * Rotate the perception basis by `angle` radians (identity unchanged):
  * `dx' = cos·dx − sin·dy`, `dy' = sin·dx + cos·dy`.
  */

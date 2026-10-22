@@ -1,6 +1,6 @@
 import * as ort from 'onnxruntime-web/webgpu';
 import type { ManifestModel } from './models';
-import { buildPerceptionWeight, CANONICAL_KERNELS, mulberry32, seedState } from './nca';
+import { buildPerceptionWeight, CANONICAL_KERNELS, modelKernels, mulberry32, seedState } from './nca';
 import type { Rng } from './nca';
 import type { CaEngine } from './engine';
 
@@ -72,6 +72,7 @@ export class CaRunner implements CaEngine {
     this.grid = meta.grid;
     this.fireRate = meta.fire_rate;
     this.seed = seed;
+    this.kernels = modelKernels(meta);
     this.weight = buildPerceptionWeight(this.channelN, this.kernels);
     this.mask = new Float32Array(this.grid * this.grid);
     this.rng = mulberry32(seed);

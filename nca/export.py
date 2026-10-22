@@ -91,7 +91,7 @@ def export_step(
     c = ca.channel_n
     x = torch.zeros(1, c, grid, grid)
     x[0, 3:, grid // 2, grid // 2] = 1.0
-    weight = _perception_kernels(c)
+    weight = ca.perception_weight()
     fire_mask = torch.ones(1, 1, grid, grid)
     step_size = torch.tensor(1.0)
 
@@ -131,7 +131,7 @@ def _torch_rollout(
     step = ExportStep(ca).eval()
     x = torch.zeros(1, channel_n, grid, grid)
     x[0, 3:, grid // 2, grid // 2] = 1.0
-    weight = _perception_kernels(channel_n)
+    weight = ca.perception_weight()
     s = torch.tensor(1.0)
     for m in masks:
         x = step(x, weight, torch.from_numpy(m), s)
@@ -139,14 +139,17 @@ def _torch_rollout(
 
 
 def _onnx_rollout(
-    onnx_path: str | Path, grid: int, masks: list[np.ndarray], channel_n: int
+    onnx_path: str | Path,
+    grid: int,
+    masks: list[np.ndarray],
+    channel_n: int,
+    weight: np.ndarray,
 ) -> np.ndarray:
     import onnxruntime as ort
 
     sess = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
     x = np.zeros((1, channel_n, grid, grid), np.float32)
     x[0, 3:, grid // 2, grid // 2] = 1.0
-    weight = _perception_kernels(channel_n).numpy()
     for m in masks:
         x = sess.run(
             ["x_next"],
@@ -170,12 +173,13 @@ def verify(
     """Compare PyTorch and ONNX rollouts at one or two grid sizes."""
     channel_n = ca.channel_n
     rng = np.random.default_rng(0)
+    weight = ca.perception_weight().detach().numpy()
     grids = [grid, grid + 8] if dynamic else [grid]
     results = {}
     for g in grids:
         masks = _make_fire_masks(steps, g, rng)
         ref = _torch_rollout(ca, g, masks, channel_n)
-        out = _onnx_rollout(onnx_path, g, masks, channel_n)
+        out = _onnx_rollout(onnx_path, g, masks, channel_n, weight)
         diff = float(np.max(np.abs(ref - out)))
         results[str(g)] = diff
         status = "ok" if diff < 1e-4 else "FAIL"
@@ -308,6 +312,11 @@ def export_one(
         "channel_n": ca.channel_n,
         "hidden_n": infer_dims(ca.state_dict())[1],
         "fire_rate": ca.fire_rate,
+        "learn_perception": bool(getattr(ca, "learn_perception", False)),
+        # The [3,3,3] (identity, d/dx, d/dy) kernels in use, flattened. For a
+        # --learn-perception model these are the trained ones, so the frontend
+        # must use them (and not the canonical Sobel).
+        "perception_kernel": [round(float(v), 8) for v in ca.kernels().reshape(-1)],
         "num_parameters": ca.num_parameters,
         "grid": grid,
         "dynamic_shape": dynamic,

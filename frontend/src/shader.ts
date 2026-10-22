@@ -14,7 +14,7 @@
  */
 
 import type { ManifestModel } from './models';
-import { CANONICAL_KERNELS, mulberry32, seedState } from './nca';
+import { CANONICAL_KERNELS, modelKernels, mulberry32, seedState } from './nca';
 import type { Rng } from './nca';
 import type { BrushOp, CaEngine, Perf } from './engine';
 import type { ChannelMapping } from './nca';
@@ -93,6 +93,7 @@ export class ShaderRunner implements CaEngine {
     this.seed = seed;
     this.hidden = model.meta.weights.hidden_n;
     this.off = model.meta.weights.offsets;
+    this.kernels = modelKernels(model.meta);
     this.weightData = weights;
     this.mask = new Float32Array(this.grid * this.grid);
     this.rng = mulberry32(seed);
@@ -383,6 +384,10 @@ export class ShaderRunner implements CaEngine {
   setKernels(ident: number[], dx: number[], dy: number[]): void {
     this.kernels = [ident.slice(), dx.slice(), dy.slice()];
     this.writeKernel();
+  }
+
+  getKernels(): number[][] {
+    return this.kernels.map((k) => k.slice());
   }
 
   /** Render the current GPU state straight to a canvas (no download). */

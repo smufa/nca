@@ -327,7 +327,9 @@ function resetKernelsUI(): void {
   angleInput.value = '0';
   angleVal.textContent = '0°';
   setLinked(true);
-  applyKernels(CANONICAL_KERNELS.map((k) => k.slice()));
+  // Start from the kernels the model actually uses (learned, for --learn-perception).
+  const kernels = runner ? runner.getKernels() : CANONICAL_KERNELS.map((k) => k.slice());
+  applyKernels(kernels);
 }
 
 function buildKernelEditors(): void {
