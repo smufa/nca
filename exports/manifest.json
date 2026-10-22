@@ -963,6 +963,326 @@
       }
     },
     {
+      "id": "cross2",
+      "path": "cross2/model.onnx",
+      "meta": {
+        "id": "cross2",
+        "created": "2026-10-22T16:06:34",
+        "channel_n": 16,
+        "cond_n": 2,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "learn_perception": false,
+        "perception_kernel": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          -0.125,
+          0.0,
+          0.125,
+          -0.25,
+          0.0,
+          0.25,
+          -0.125,
+          0.0,
+          0.125,
+          -0.125,
+          -0.25,
+          -0.125,
+          0.0,
+          0.0,
+          0.0,
+          0.125,
+          0.25,
+          0.125
+        ],
+        "num_parameters": 8592,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 19,
+        "experiment": "regenerating",
+        "target": "emoji:1f980",
+        "targets": [
+          "emoji:1f980",
+          "emoji:1f419"
+        ],
+        "source_checkpoint": "runs/cross2/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 3.814697265625e-06,
+          "80": 1.9073486328125e-06
+        },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "perception_n": 50,
+          "perception_padded_n": 52,
+          "offsets": {
+            "w1": 0,
+            "b1": 6656,
+            "w2": 6784,
+            "b2": 8832
+          },
+          "count": 8848
+        },
+        "size_bytes": 54178,
+        "git_rev": "b58eb80"
+      }
+    },
+    {
+      "id": "cross4",
+      "path": "cross4/model.onnx",
+      "meta": {
+        "id": "cross4",
+        "created": "2026-10-22T16:06:43",
+        "channel_n": 16,
+        "cond_n": 4,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "learn_perception": false,
+        "perception_kernel": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          -0.125,
+          0.0,
+          0.125,
+          -0.25,
+          0.0,
+          0.25,
+          -0.125,
+          0.0,
+          0.125,
+          -0.125,
+          -0.25,
+          -0.125,
+          0.0,
+          0.0,
+          0.0,
+          0.125,
+          0.25,
+          0.125
+        ],
+        "num_parameters": 8848,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 19,
+        "experiment": "regenerating",
+        "target": "emoji:1f980",
+        "targets": [
+          "emoji:1f980",
+          "emoji:1f419",
+          "emoji:1f996",
+          "emoji:1f422"
+        ],
+        "source_checkpoint": "runs/cross4/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 9.5367431640625e-07,
+          "80": 9.5367431640625e-07
+        },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "perception_n": 52,
+          "perception_padded_n": 52,
+          "offsets": {
+            "w1": 0,
+            "b1": 6656,
+            "w2": 6784,
+            "b2": 8832
+          },
+          "count": 8848
+        },
+        "size_bytes": 55202,
+        "git_rev": "b58eb80"
+      }
+    },
+    {
+      "id": "cross6",
+      "path": "cross6/model.onnx",
+      "meta": {
+        "id": "cross6",
+        "created": "2026-10-22T16:06:52",
+        "channel_n": 16,
+        "cond_n": 6,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "learn_perception": false,
+        "perception_kernel": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          -0.125,
+          0.0,
+          0.125,
+          -0.25,
+          0.0,
+          0.25,
+          -0.125,
+          0.0,
+          0.125,
+          -0.125,
+          -0.25,
+          -0.125,
+          0.0,
+          0.0,
+          0.0,
+          0.125,
+          0.25,
+          0.125
+        ],
+        "num_parameters": 9104,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 19,
+        "experiment": "regenerating",
+        "target": "emoji:1f980",
+        "targets": [
+          "emoji:1f980",
+          "emoji:1f419",
+          "emoji:1f996",
+          "emoji:1f422",
+          "emoji:1f335",
+          "emoji:1f344"
+        ],
+        "source_checkpoint": "runs/cross6/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 9.5367431640625e-07,
+          "80": 7.152557373046875e-07
+        },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "perception_n": 54,
+          "perception_padded_n": 56,
+          "offsets": {
+            "w1": 0,
+            "b1": 7168,
+            "w2": 7296,
+            "b2": 9344
+          },
+          "count": 9360
+        },
+        "size_bytes": 56226,
+        "git_rev": "b58eb80"
+      }
+    },
+    {
+      "id": "cross8",
+      "path": "cross8/model.onnx",
+      "meta": {
+        "id": "cross8",
+        "created": "2026-10-22T16:07:00",
+        "channel_n": 16,
+        "cond_n": 8,
+        "hidden_n": 128,
+        "fire_rate": 0.5,
+        "learn_perception": false,
+        "perception_kernel": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          -0.125,
+          0.0,
+          0.125,
+          -0.25,
+          0.0,
+          0.25,
+          -0.125,
+          0.0,
+          0.125,
+          -0.125,
+          -0.25,
+          -0.125,
+          0.0,
+          0.0,
+          0.0,
+          0.125,
+          0.25,
+          0.125
+        ],
+        "num_parameters": 9360,
+        "grid": 72,
+        "dynamic_shape": true,
+        "wrap": true,
+        "opset": 19,
+        "experiment": "regenerating",
+        "target": "emoji:1f980",
+        "targets": [
+          "emoji:1f980",
+          "emoji:1f419",
+          "emoji:1f996",
+          "emoji:1f422",
+          "emoji:1f335",
+          "emoji:1f344",
+          "emoji:1f41d",
+          "emoji:1f9a9"
+        ],
+        "source_checkpoint": "runs/cross8/ckpt_final.pt",
+        "torch_version": "2.14.1+cpu",
+        "onnxruntime_version": "1.31.0",
+        "onnx_ir_version": 10,
+        "parity_max_abs_diff": {
+          "72": 5.960464477539062e-07,
+          "80": 9.5367431640625e-07
+        },
+        "weights": {
+          "file": "weights.bin",
+          "channel_n": 16,
+          "hidden_n": 128,
+          "perception_n": 56,
+          "perception_padded_n": 56,
+          "offsets": {
+            "w1": 0,
+            "b1": 7168,
+            "w2": 7296,
+            "b2": 9344
+          },
+          "count": 9360
+        },
+        "size_bytes": 57250,
+        "git_rev": "b58eb80"
+      }
+    },
+    {
       "id": "multi2",
       "path": "multi2/model.onnx",
       "meta": {
@@ -1803,5 +2123,5 @@
       }
     }
   ],
-  "generated": "2026-10-22T14:50:51"
+  "generated": "2026-10-22T16:07:00"
 }

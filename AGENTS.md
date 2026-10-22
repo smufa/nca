@@ -251,6 +251,29 @@ fall with N (visibly blurrier at 8), so one shared MLP is capacity-limited rathe
 than conditioning-limited. These losses are ~10x a single-target 2.0e-4 and are not
 comparable across regimes - check the playground, not the number.
 
+### `--mismatch-p` is what makes the conditioning *steer* (`cross*` vs `multi*`)
+
+The same sweep with `--mismatch-p 0.3` (`cross2..8`) costs ~1.5-2x in loss
+(min 3.2e-3 / 3.4e-3 / 4.1e-3 / 5.8e-3 for N=2/4/6/8 vs 2.4e-3 / 1.9e-3 / 3.4e-3 /
+3.9e-3 matched), because the task is strictly harder. But it buys the property the
+matched models do not have. Grow emoji 0, then switch the one-hot to emoji 1 mid-run
+(err vs each target's image, 0-255):
+
+| model | err vs source | err vs dest | result |
+|---|---:|---:|---|
+| `multi4` | 20.5 | 10.1 | **a purple crab** - recolours a memorised attractor, body plan frozen |
+| `cross4` | 24.3 | 5.3 | crab -> octopus, morphs |
+| `cross8` | 24.4 | 5.8 | morphs |
+
+So a matched model treats the one-hot as an *index* into N attractors: it follows
+the colour code but cannot restructure. Only cross-target training makes the
+one-hot modulate the update rule itself. Loss cannot show this - it is not
+comparable across regimes and both models score well - which is why the check is
+to switch the target mid-run in the playground.
+
+The frontend's `setCond()` therefore does **not** reset the state: switching the
+Target picker converts in place, which is the only way to see this.
+
 ## Gotchas
 
 - **NixOS + Vulkan (for `scripts/shader_bench.py`)**: the loader/ICDs aren't on
