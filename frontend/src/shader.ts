@@ -55,6 +55,7 @@ export class ShaderRunner implements CaEngine {
   private weightBuf!: GPUBuffer;
   private weight4Buf!: GPUBuffer;
   private kernelBuf!: GPUBuffer;
+  private condBuf!: GPUBuffer;
   private paramsBuf!: GPUBuffer;
   private staging!: GPUBuffer;
 
@@ -72,6 +73,9 @@ export class ShaderRunner implements CaEngine {
   private stateBytes = 0;
   private mask: Float32Array;
   private kernels: number[][] = CANONICAL_KERNELS.map((k) => k.slice());
+  /** One-hot target selector for a conditional model (length condN, may be 0). */
+  private condN = 0;
+  private cond: Float32Array;
   private rng: Rng;
   private seed: number;
   private stepping = false;
@@ -94,6 +98,9 @@ export class ShaderRunner implements CaEngine {
     this.hidden = model.meta.weights.hidden_n;
     this.off = model.meta.weights.offsets;
     this.kernels = modelKernels(model.meta);
+    this.condN = model.meta.cond_n ?? 0;
+    this.cond = new Float32Array(Math.max(this.condN, 1));
+    if (this.condN) this.cond[0] = 1;
     this.weightData = weights;
     this.mask = new Float32Array(this.grid * this.grid);
     this.rng = mulberry32(seed);
@@ -125,14 +132,15 @@ export class ShaderRunner implements CaEngine {
     return runner;
   }
 
-  /** The WGSL kernel assumes at most 16 channels and a multiple-of-4 hidden. */
+  /**
+   * The WGSL step assumes at most 16 state channels, a multiple-of-4 hidden, and
+   * at most 16 one-hot selector values (perc is `array<f32, 64>` = 3*16 + 16).
+   */
   static supports(model: ManifestModel): boolean {
     const C = model.meta.channel_n;
     const h = model.meta.weights.hidden_n;
-    // Conditional models need the one-hot appended to `perc`, which the shader
-    // does not do yet - fall back to WASM for those.
-    const conditional = (model.meta.cond_n ?? 0) > 0;
-    return C >= 4 && C <= 16 && h > 0 && h % 4 === 0 && !conditional;
+    const condN = model.meta.cond_n ?? 0;
+    return C >= 4 && C <= 16 && h > 0 && h % 4 === 0 && condN <= 16;
   }
 
   get mode(): string {
@@ -148,8 +156,14 @@ export class ShaderRunner implements CaEngine {
     // Size-dependent constants are pipeline overrides so naga keeps the MLP
     // loops unrolled (dynamic bounds cost ~1.9x).
     const C = this.channelN;
-    const w1s4 = Math.ceil((3 * C) / 4);
-    const constants = { C, NP4: w1s4, W1S4: w1s4, HG: this.hidden / 4 };
+    const p4 = Math.ceil((3 * C + this.condN) / 4);
+    const constants = {
+      C,
+      NP4: p4,
+      W1S4: p4,
+      HG: this.hidden / 4,
+      CONDN: this.condN,
+    };
     this.pipeline1 = d.createComputePipeline({
       layout: 'auto',
       compute: {
@@ -192,6 +206,12 @@ export class ShaderRunner implements CaEngine {
       size: 27 * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
+    // Always bound, even for an unconditional model (CONDN=0 reads nothing).
+    this.condBuf = d.createBuffer({
+      size: Math.max(16, this.condN * 4),
+      usage: STORAGE,
+    });
+    this.writeCond();
     this.paramsBuf = d.createBuffer({
       size: 48,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -237,6 +257,7 @@ export class ShaderRunner implements CaEngine {
           { binding: 4, resource: { buffer: this.tmpBuf } },
           { binding: 5, resource: { buffer: this.paramsBuf } },
           { binding: 6, resource: { buffer: this.weight4Buf } },
+          { binding: 7, resource: { buffer: this.condBuf } },
         ],
       });
     const bg2 = (old: GPUBuffer, next: GPUBuffer): GPUBindGroup =>
@@ -393,6 +414,19 @@ export class ShaderRunner implements CaEngine {
     return this.kernels.map((k) => k.slice());
   }
 
+  /** Select which target a conditional model should grow. */
+  setCond(index: number): void {
+    if (!this.condN) return;
+    this.cond.fill(0);
+    this.cond[Math.max(0, Math.min(this.condN - 1, index | 0))] = 1;
+    this.writeCond();
+    this.reset();
+  }
+
+  private writeCond(): void {
+    if (this.condN) this.device.queue.writeBuffer(this.condBuf, 0, this.cond);
+  }
+
   /** Render the current GPU state straight to a canvas (no download). */
   renderTo(canvas: HTMLCanvasElement, mapping: ChannelMapping): void {
     const d = this.device;
@@ -492,6 +526,7 @@ export class ShaderRunner implements CaEngine {
       this.weightBuf,
       this.weight4Buf,
       this.kernelBuf,
+      this.condBuf,
       this.paramsBuf,
       this.staging,
     ]) {
