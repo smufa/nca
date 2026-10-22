@@ -362,6 +362,17 @@ def _save_weights(ca: NeuralCA, model_dir: Path, spec: ModelSpec) -> dict:
     return spec.weights_meta()
 
 
+# Meta fields that describe *which study the model belongs to* rather than the
+# exported graph. A re-export regenerates everything else from the checkpoint, so
+# these are carried over from the existing meta (the picker groups by them).
+PRESENTATION_KEYS = ("name", "sweep", "train", "picker")
+
+
+def _carry_over(meta: dict) -> dict:
+    """The presentation fields of an existing meta, for ``export_one(carry=...)``."""
+    return {k: meta[k] for k in PRESENTATION_KEYS if k in meta}
+
+
 def export_one(
     checkpoint: str | Path,
     model_id: str,
@@ -377,6 +388,7 @@ def export_one(
     targets: list[str] | None = None,
     max_size: int | None = None,
     padding: int | None = None,
+    carry: dict | None = None,
 ) -> dict:
     import onnx
     import onnxruntime as ort
@@ -427,6 +439,7 @@ def export_one(
     model_proto = onnx.load(str(onnx_path))
     meta = {
         "id": model_id,
+        **(carry or {}),
         "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "channel_n": spec.channel_n,
         "cond_n": spec.cond_n,
@@ -524,6 +537,7 @@ def export_all(
                 # without target_size/padding must not silently gain a default).
                 max_size=meta.get("target_size"),
                 padding=meta.get("padding"),
+                carry=_carry_over(meta),
             )
         )
 

@@ -26,7 +26,7 @@ echo "== frontend build =="
 ( cd frontend && npm run build >/dev/null ) && echo ok
 
 echo "== WGSL step vs ONNX (100 steps) =="
-if bash scripts/bench.sh crab_regenerating --steps 100 --reference; then
+if bash scripts/bench.sh crab.regenerating --steps 100 --reference; then
     :
 else
     status=$?

@@ -100,7 +100,16 @@ and no re-export is required. Only Phase 6 (features) changes the graph.
 - `crab_c16_h128` and `crab_regenerating` are the same configuration (8336 params,
   same experiment); one is a leftover of the capacity sweep.
 - `crab_regen_8000` vs `crab_regen_8000_static` are the **same checkpoint**,
-  differing only by `dynamic_shape` — a naming problem, not two runs.
+  differing only by `dynamic_shape` — a naming problem, not two runs. (Phase 2
+  resolved the naming: `crab.regenerating.ckpt=8000` vs `…8000.static`.)
+- **Found while renaming**: re-exporting `crab.regenerating.c=6.h=128` from its
+  surviving checkpoint (`runs/cap_c6_h128`) produces a `model.onnx` **41 bytes
+  larger** (29218 -> 29259) than the committed one, parity still 3.8e-06 — so one
+  committed graph predates a change in `nca/export.py`. Every other export
+  re-exported byte-identically. Nothing in CI can see this: it needs the
+  checkpoint. The guard is a periodic `nca.export --all` with a clean `git diff`
+  (24 of 45 checkpoints are in `/tmp`, so this is also why they should be
+  archived under `runs/`).
 
 ---
 
@@ -267,26 +276,41 @@ authoritative.** The full training config lives in meta, not in the id.
 | `turtle_growing` | `turtle.growing` | | `crab_noisy` | `crab.regenerating.noise` |
 | `turtle_persistent` | `turtle.persistent` | | `multi2`…`multi8` | `multiN.matched` |
 | `turtle_regenerating` | `turtle.regenerating` | | `cross2`…`cross8` | `crossN.mismatch=0.3` |
-| `smile-demo` | `smile.demo` | | `cross8_wide` | `cross8.mismatch=0.3.h=256` |
-| | | | `cross8_deep` | `cross8.mismatch=0.3.l=2` |
+| `smile-demo` | `smile.demo` | | `cross8` | `cross8.mismatch` | | `cross8_wide` | `cross8.mismatch.h=256` |
+| | | | `cross8_deep` | `cross8.mismatch.l=2` |
 
 ### Mechanics
 
-- [ ] Write `exports/<id>/meta.json` first, then `git mv` the dir, then regenerate
-      `manifest.json` from the metas (`export --reindex`, not incremental append —
-      `_update_manifest` currently appends and sorts, which cannot express renames).
-- [ ] `meta.json` gains: `name` (= the id), `sweep` (which study produced it),
-      `train` (the full `Experiment`), and an optional `picker: {group, label,
-      order}` override.
-- [ ] Grouping in `frontend/src/models.ts`: **delete the 7-pattern regex ladder**
-      in `modelGroup`. Group comes from `meta.sweep` (written by the sweep
-      manifest in Phase 3); the label is the id segments after the task
-      (`c=16.h=8` → "c=16 h=8"). ~10 lines instead of ~60.
-- [ ] Add `?model=<id>` deep link (no model id is persisted today — only
-      `nca.ep` in localStorage — so the rename is zero-risk for saved state).
-- [ ] Decide the fate of the two exact duplicates (`crab_c16_h128` vs
-      `crab.regenerating`): drop the sweep copy, or keep it with `sweep: capacity`
-      and a `duplicate_of` field.
+**As built** (`scripts/rename_exports.py` is the migration and the record of the
+old names; it is the only place the legacy grammar survives):
+
+- [x] `scripts/rename_exports.py` writes `exports/<id>/meta.json` first, then
+      `git mv`s the dir, then rebuilds `manifest.json` from the metas
+      (`export --reindex` — `_update_manifest` appends and sorts, which cannot
+      express a rename). It is idempotent and refuses a table that does not cover
+      `exports/` exactly.
+- [x] `meta.json` gained `name` (= the id) and `sweep` (the study that produced it
+      — `emoji-sweep`, `capacity`, `checkpoints`, `experiments`, `multitarget`,
+      `crosstarget`, `demo`), plus `train` for the numbers the id encodes but the
+      exporter never recorded (`iteration`, `mismatch_p`, each with
+      `recovered_from`). `picker: {group, label, order}` is supported and unused so
+      far.
+- [x] `frontend/src/models.ts`: the 7-pattern regex ladder is gone. Group comes
+      from `meta.sweep`, the label from the id segments after the task
+      (`c=16.h=8` → "c=16 h=8", `ckpt=2000` → "@2000"), the sort key from a
+      numeric parse. ~40 lines instead of ~60, and no model name knowledge.
+- [x] `?model=<id>` deep link; a stale id now fails loudly
+      (`setStatus("unknown model in ?model=…", 'err')`) instead of showing the
+      first model. Only `nca.ep` was ever persisted, so nothing else broke.
+- [x] Duplicates: `crab.regenerating` (sweep copy, grid 72) and
+      `crab.regenerating.c=16.h=128` (capacity sweep, grid 64) are **not** the same
+      model — different canvas, so different exported graph. Both stay, told apart
+      by `sweep`; no `duplicate_of` field needed.
+
+Design deviation: the id grammar allows no `.` inside a value, so the cross-target
+family is `cross8.mismatch` (task word) and the probability lives in
+`train.mismatch_p`. A `mismatch=0.3` segment would split mid-value in every tool
+that treats the id as dot-separated (the picker label did exactly that).
 
 **Acceptance:** `ls exports` sorts into readable families; the picker groups
 without regexes; old URLs break once, loudly (no silent wrong model).

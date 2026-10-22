@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Run the headless WGSL correctness/benchmark harness with the right Vulkan env.
 #
-#   bash scripts/bench.sh crab_regenerating --steps 150 --reference
-#   bash scripts/bench.sh crab_regenerating --grid 256
-#   bash scripts/bench.sh crab_regenerating --shader scripts/variants/pass1_vec4.wgsl
+#   bash scripts/bench.sh crab.regenerating --steps 150 --reference
+#   bash scripts/bench.sh crab.regenerating --grid 256
+#   bash scripts/bench.sh crab.regenerating --shader scripts/variants/pass1_vec4.wgsl
 #
 # On NixOS the Vulkan loader and ICDs are not on the default library path, so wgpu
 # reports "No suitable graphics adapter found". Set VK_ICD_FILENAMES to

@@ -9,7 +9,7 @@ On NixOS the Vulkan loader/driver need to be on the library path, e.g.::
     LOADER=$(dirname $(ls /nix/store/*vulkan-loader*/lib/libvulkan.so.1 | head -1))
     LD_LIBRARY_PATH=$LOADER:/run/opengl-driver/lib \
     VK_ICD_FILENAMES=/run/opengl-driver/share/vulkan/icd.d/intel_icd.x86_64.json \
-    uv run --with wgpu,numpy,onnxruntime python scripts/shader_bench.py crab_regenerating --steps 200
+    uv run --with wgpu,numpy,onnxruntime python scripts/shader_bench.py crab.regenerating --steps 200
 
 Use ``--shader path.wgsl`` to benchmark a variant of pass1.
 """

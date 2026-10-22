@@ -1,0 +1,46 @@
+{
+  "id": "crab.regenerating.c=8.h=128",
+  "name": "crab.regenerating.c=8.h=128",
+  "sweep": "capacity",
+  "created": "2026-10-22T02:19:23",
+  "channel_n": 8,
+  "hidden_n": 128,
+  "fire_rate": 0.5,
+  "num_parameters": 4232,
+  "grid": 64,
+  "dynamic_shape": true,
+  "wrap": true,
+  "opset": 19,
+  "experiment": "regenerating",
+  "target": "emoji:1f980",
+  "source_checkpoint": "runs/cap_c8_h128/ckpt_final.pt",
+  "torch_version": "2.14.1+cpu",
+  "onnxruntime_version": "1.31.0",
+  "onnx_ir_version": 10,
+  "parity_max_abs_diff": {
+    "64": 7.62939453125e-06,
+    "72": 1.1444091796875e-05
+  },
+  "weights": {
+    "file": "weights.bin",
+    "channel_n": 8,
+    "hidden_n": 128,
+    "hidden_layers": 1,
+    "perception_n": 24,
+    "perception_padded_n": 24,
+    "offsets": {
+      "w1": 0,
+      "b1": 3072,
+      "w2": 3200,
+      "b2": 4224
+    },
+    "count": 4232
+  },
+  "size_bytes": 33322,
+  "git_rev": "e7f5a6c",
+  "hidden_layers": 1,
+  "cond_n": 0,
+  "learn_perception": false,
+  "target_size": 40,
+  "padding": 12
+}

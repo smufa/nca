@@ -18,7 +18,7 @@ support it.
 | run | targets | params | min loss |
 |---|---:|---:|---:|
 | `multi2` | 2 | 8592 | 2.4e-3 |
-| `multi4` | 4 | 8848 | 1.9e-3 |
+| `multi4.matched` | 4 | 8848 | 1.9e-3 |
 | `multi6` | 6 | 9104 | 3.4e-3 |
 | `multi8` | 8 | 9360 | 3.9e-3 |
 
@@ -38,9 +38,9 @@ mid-run (err vs each target's image, 0-255):
 
 | model | err vs source | err vs dest | result |
 |---|---:|---:|---|
-| `multi4` | 20.5 | 10.1 | **a purple crab** — recolours a memorised attractor, body plan frozen |
+| `multi4.matched` | 20.5 | 10.1 | **a purple crab** — recolours a memorised attractor, body plan frozen |
 | `cross4` | 24.3 | 5.3 | crab → octopus, morphs |
-| `cross8` | 24.4 | 5.8 | morphs |
+| `cross8.mismatch` | 24.4 | 5.8 | morphs |
 
 So a matched model treats the one-hot as an *index* into N attractors: it follows
 the colour code but cannot restructure. Only cross-target training makes the one-hot
@@ -55,14 +55,14 @@ vector of sliders (-1..1), not a one-hot selector, so out-of-distribution mixtur
 
 ## Wider vs deeper for 8 emoji
 
-Both 8-target, `--mismatch-p 0.3`, same schedule; baseline `cross8` is hidden=128,
+Both 8-target, `--mismatch-p 0.3`, same schedule; baseline `cross8.mismatch` is hidden=128,
 1 layer, 9360 params.
 
 | run | shape | params | min loss | 8/8 correct | converts | shader |
 |---|---|---:|---:|---|---|---|
-| `cross8` | h128 ×1 | 9360 | 5.8e-3 | yes | yes | 1.8 ms |
-| `cross8_wide` | h256 ×1 | 18.7k | 3.8e-3 | yes | yes | 3.3 ms |
-| `cross8_deep` | h128 ×2 | 25.9k | **2.7e-3** | yes | yes | 10.2 ms |
+| `cross8.mismatch` | h128 ×1 | 9360 | 5.8e-3 | yes | yes | 1.8 ms |
+| `cross8.mismatch.h=256` | h256 ×1 | 18.7k | 3.8e-3 | yes | yes | 3.3 ms |
+| `cross8.mismatch.l=2` | h128 ×2 | 25.9k | **2.7e-3** | yes | yes | 10.2 ms |
 
 All three grow the right emoji for every index and convert 0→1, so neither change
 broke conditioning. Depth is the better use of capacity (2.7e-3 vs 3.8e-3 at 38%
@@ -71,7 +71,7 @@ signal here, but they do have different budgets, so this does not isolate width 
 depth.
 
 Shader cost is worth knowing: the `hidden → hidden` layer is ~2.7× the `W1` work and
-the rest is register pressure from holding the hidden vector, so `cross8_deep` runs
+the rest is register pressure from holding the hidden vector, so `cross8.mismatch.l=2` runs
 at ~98 steps/s vs ~620 for a 128-wide single-layer model. Still interactive.
 
 ## Known gap

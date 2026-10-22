@@ -109,7 +109,7 @@ cd frontend && npm install && npm run dev     # http://localhost:5173
 npm run build                                 # tsc + vite build
 
 bash scripts/verify.sh                        # compile + tests + meta + build + parity
-bash scripts/bench.sh crab_regenerating --reference   # headless GPU correctness/perf
+bash scripts/bench.sh crab.regenerating --reference   # headless GPU correctness/perf
 ```
 
 ## Frontend engines

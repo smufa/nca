@@ -96,6 +96,13 @@ def _check_spec_fields(
     problems: list[Problem] = []
     if meta.get("id") != model_id:
         problems.append(_error(f"id {meta.get('id')!r} != directory {model_id!r}"))
+    # The picker groups by `sweep` and expects `name` to be the id; without them a
+    # model falls into "Other" (and a re-export used to drop them silently, which
+    # this catches -- `export_one(carry=...)` now preserves them).
+    if not meta.get("sweep"):
+        problems.append(_warn("no sweep[] -- the picker cannot group this model"))
+    if "name" in meta and meta["name"] != meta.get("id"):
+        problems.append(_error(f"name {meta['name']!r} != id {meta.get('id')!r}"))
 
     expected = spec.meta_fields()
     for key in SPEC_KEYS:

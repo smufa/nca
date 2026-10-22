@@ -3,7 +3,7 @@
 Everything about the model's shape (channels, hidden width, depth, conditioning,
 learned perception, boundary mode) is read from the run's ``spec.json`` or the
 checkpoint itself, so this works for every model in ``exports/`` -- including the
-conditional (``cross*`` / ``multi*``) and deeper (``cross8_deep``) ones.
+conditional (``cross*`` / ``multi*``) and deeper (``cross8.mismatch.l=2``) ones.
 
 Examples::
 
@@ -11,7 +11,7 @@ Examples::
     uv run python -m nca.sample --checkpoint runs/.../ckpt_final.pt --steps 300
 
     # same, but let the run directory tell us the shape
-    uv run python -m nca.sample --run runs/crab_regenerating --steps 300
+    uv run python -m nca.sample --run runs/crab_noisy --steps 300
 
     # a conditional model: grow target index 3
     uv run python -m nca.sample --run runs/cross8 --cond 3 --steps 300

@@ -125,6 +125,40 @@ def test_reindex_rebuilds_the_manifest_from_metas(tmp_path):
     assert "generated" in manifest
 
 
+def test_export_all_carries_the_presentation_fields(tmp_path, monkeypatch):
+    """A re-export must not drop `sweep`/`train` -- the picker groups by them."""
+    exports = tmp_path / "exports"
+    _fake_model(exports, "crab.growing")
+    checkpoint = tmp_path / "ckpt.pt"
+    checkpoint.write_bytes(b"not really a checkpoint")
+    meta_path = exports / "crab.growing" / "meta.json"
+    meta = json.loads(meta_path.read_text())
+    meta.update(
+        sweep="emoji-sweep",
+        name="crab.growing",
+        train={"iteration": 8000},
+        source_checkpoint=str(checkpoint),
+    )
+    meta_path.write_text(json.dumps(meta))
+
+    seen: dict = {}
+    monkeypatch.setattr("nca.export.export_one", lambda **kw: seen.update(kw) or {})
+    monkeypatch.setattr("nca.export.reindex", lambda out: [])
+    export_all(exports, do_verify=False)
+
+    assert seen["carry"] == {
+        "name": "crab.growing",
+        "sweep": "emoji-sweep",
+        "train": {"iteration": 8000},
+    }
+
+
+def test_committed_metas_carry_a_sweep():
+    """Every shipped model must be groupable: the picker reads `meta.sweep`."""
+    missing = [model_id for model_id, meta in META if not meta.get("sweep")]
+    assert not missing, f"no sweep recorded: {missing}"
+
+
 def test_export_all_skips_models_without_a_checkpoint(tmp_path, capsys):
     exports = tmp_path / "exports"
     _fake_model(exports, "gone")

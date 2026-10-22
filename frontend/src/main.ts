@@ -671,6 +671,7 @@ async function selectModel(model: ManifestModel): Promise<void> {
   const token = ++selectToken;
   playing = false;
   playBtn.textContent = 'Play';
+  rememberModel(model.id);
   setStatus(`loading ${model.id}…`, 'warn');
 
   // Let any in-flight step finish before releasing the old session, otherwise
@@ -726,6 +727,8 @@ async function loadModels(): Promise<void> {
     return;
   }
   modelSelect.innerHTML = '';
+  const wanted = new URLSearchParams(location.search).get('model');
+  const fromUrl = wanted ? manifest.models.find((m) => m.id === wanted) : undefined;
   const entries = manifest.models.map((m, i) => ({ m, g: modelGroup(m), i }));
   const names = [...GROUP_ORDER];
   for (const e of entries) if (!names.includes(e.g.group)) names.push(e.g.group);
@@ -745,13 +748,25 @@ async function loadModels(): Promise<void> {
     }
     modelSelect.appendChild(og);
   }
-  const first = manifest.models[0];
+  const first = fromUrl ?? manifest.models[0];
+  if (wanted && !fromUrl) {
+    // A stale link (the id grammar changed once, see docs/HOUSEKEEPING.md). Say so
+    // instead of silently showing a different model.
+    setStatus(`unknown model in ?model=${wanted}`, 'err');
+  }
   if (first) {
     modelSelect.value = first.id;
     await selectModel(first);
   } else {
     setStatus('no models in manifest', 'warn');
   }
+}
+
+/** `?model=<id>` deep link; keeps `?ep=` and any other param intact. */
+function rememberModel(modelId: string): void {
+  const params = new URLSearchParams(location.search);
+  params.set('model', modelId);
+  history.replaceState(null, '', `${location.pathname}?${params}`);
 }
 
 function updateCursors(): void {

@@ -5,9 +5,9 @@ Vulkan (`wgpu-py`) and diffs the result against onnxruntime — use it instead o
 guessing. See the `headless-webgpu` skill for the NixOS/Vulkan setup.
 
 ```bash
-bash scripts/bench.sh crab_regenerating --steps 150 --reference   # correctness + perf
-bash scripts/bench.sh crab_regenerating --grid 256
-bash scripts/bench.sh crab_regenerating --shader scripts/variants/foo.wgsl
+bash scripts/bench.sh crab.regenerating --steps 150 --reference   # correctness + perf
+bash scripts/bench.sh crab.regenerating --grid 256
+bash scripts/bench.sh crab.regenerating --shader scripts/variants/foo.wgsl
 ```
 
 `--reference` reports a **1-step** diff as the correctness gate. The N-step diff is
@@ -51,6 +51,6 @@ each `W1` row from `3C` to `ceil(3C/4)*4` floats so `vec4` loads stay aligned; a
 per row). Supported: `4 ≤ C ≤ 16`, `hidden % 4 == 0` (`ShaderRunner.supports`),
 otherwise the frontend falls back to the WASM engine.
 
-Multi-layer MLPs are supported too (`hidden_layers > 1`, `cross8_deep`), but the
+Multi-layer MLPs are supported too (`hidden_layers > 1`, `cross8.mismatch.l=2`), but the
 `hidden -> hidden` blocks cost ~2.7× the `W1` work plus register pressure from
 holding the hidden vector: ~98 steps/s vs ~620 for a 128-wide single-layer model.
