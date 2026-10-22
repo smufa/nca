@@ -32,6 +32,46 @@ META = _export_metas()
 META_IDS = [model_id for model_id, _ in META]
 
 
+def _state_from_onnx(model_dir: Path) -> dict:
+    """The committed graph's weights as a module state dict.
+
+    ``model.onnx`` is committed for every export, so this makes the
+    ``weights.bin`` layout checkable in a clean clone -- the checkpoint-based test
+    below skips there (`runs/` is gitignored), which left CI green while nothing
+    verified the blob against the model.
+    """
+    import onnx
+    from onnx import numpy_helper
+
+    torch = pytest.importorskip("torch")
+    graph = onnx.load(str(model_dir / "model.onnx")).graph
+    return {
+        init.name[len("ca.") :]: torch.from_numpy(numpy_helper.to_array(init).copy())
+        for init in graph.initializer
+        if init.name.startswith("ca.")
+    }
+
+
+@pytest.mark.parametrize(("model_id", "meta"), META, ids=META_IDS)
+def test_committed_blob_is_a_repack_of_the_committed_graph(model_id, meta, tmp_path):
+    """``weights.bin`` == ``_save_weights(graph weights)``, without the run dir."""
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("onnx")
+
+    spec = ModelSpec.from_meta(meta)
+    state = _state_from_onnx(EXPORTS / model_id)
+    ca = spec.build()
+    missing, unexpected = ca.load_state_dict(state, strict=False)
+    # Only the learned perception kernels are absent, and they are not in the blob.
+    assert not unexpected, f"{model_id}: unexpected keys {unexpected}"
+    assert set(missing) <= {"sobel"}, f"{model_id}: keys missing from the graph: {missing}"
+
+    _save_weights(ca, tmp_path, spec)
+    rebuilt = (tmp_path / "weights.bin").read_bytes()
+    shipped = (EXPORTS / model_id / "weights.bin").read_bytes()
+    assert rebuilt == shipped, f"{model_id}: weights.bin is not a repack of model.onnx"
+
+
 @pytest.mark.parametrize(("model_id", "meta"), META, ids=META_IDS)
 def test_save_weights_reproduces_committed_blob(model_id, meta, tmp_path):
     torch = pytest.importorskip("torch")

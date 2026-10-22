@@ -90,7 +90,9 @@ def _check_files(model_dir: Path, meta: dict[str, Any]) -> list[Problem]:
     return problems
 
 
-def _check_spec_fields(model_id: str, meta: dict[str, Any], spec: ModelSpec) -> list[Problem]:
+def _check_spec_fields(
+    model_id: str, model_dir: Path, meta: dict[str, Any], spec: ModelSpec
+) -> list[Problem]:
     problems: list[Problem] = []
     if meta.get("id") != model_id:
         problems.append(_error(f"id {meta.get('id')!r} != directory {model_id!r}"))
@@ -115,11 +117,18 @@ def _check_spec_fields(model_id: str, meta: dict[str, Any], spec: ModelSpec) -> 
         problems.append(_error(f"targets has {len(targets)} entries, cond_n is {meta.get('cond_n', 0)}"))
     if not isinstance(meta.get("grid"), int) or meta["grid"] <= 0:
         problems.append(_error("grid must be a positive int (dummy export shape)"))
-    # grid is the canvas the run grew on: target_size + 2*padding.
+    # grid is the canvas the run grew on: target_size + 2*padding. Pre-spec runs
+    # have no target.npy, so the split cannot be recovered from the export alone --
+    # say so once instead of inventing numbers.
     target_size, padding = meta.get("target_size"), meta.get("padding")
     if target_size is None or padding is None:
+        level = "info" if (model_dir / "target.png").exists() else "warn"
         problems.append(
-            _warn("target_size/padding missing (legacy export; target.png cannot be rebuilt); re-export or --fix")
+            Problem(
+                level,
+                "target_size/padding not recorded (run predates target.npy); "
+                "target.png is committed, but a re-export needs both flags",
+            )
         )
     elif isinstance(meta.get("grid"), int) and target_size + 2 * padding != meta["grid"]:
         problems.append(
@@ -240,24 +249,119 @@ def check_model(model_dir: Path, *, graph: bool = True) -> tuple[dict[str, Any] 
         return meta, problems + [_error(f"ModelSpec.from_meta failed: {exc}")]
 
     problems += _check_files(model_dir, meta)
-    problems += _check_spec_fields(model_id, meta, spec)
+    problems += _check_spec_fields(model_id, model_dir, meta, spec)
     problems += _check_weights(model_dir, meta, spec)
     if graph:
         problems += _check_graph(model_dir, meta, spec)
     return meta, problems
 
 
-def fix_meta(meta: dict[str, Any], spec: ModelSpec) -> dict[str, Any]:
-    """Return ``meta`` with every spec-owned field rewritten from ``spec``."""
+def derive_spec(model_dir: Path, meta: dict[str, Any]) -> tuple[ModelSpec | None, str]:
+    """Recover the spec from the artifacts (graph + blob), not from ``meta.json``.
+
+    ``--fix`` used to rebuild the spec out of the very file it was repairing, so a
+    wrong ``hidden_n`` was "repaired" into a self-consistent but wrong meta (and
+    the wrong ``weights.count`` / ``num_parameters`` overwrote the last correct
+    fields). The ONNX graph and ``weights.bin`` are the ground truth; ``meta.json``
+    is what we are checking. ``learn_perception``/``fire_rate`` are not in either
+    artifact, so they are taken from ``meta`` (``learn_perception`` only adds the
+    18-float Sobel pair, which is *not* in the blob).
+    """
+    try:
+        import onnx
+    except ImportError:
+        return None, "onnx is not installed"
+    path = model_dir / "model.onnx"
+    if not path.is_file():
+        return None, "no model.onnx"
+    graph = onnx.load(str(path)).graph
+    inputs = {i.name: _dims(i) for i in graph.input}
+    pw = inputs.get("perception_weight")
+    if not pw or len(pw) != 4 or not isinstance(pw[0], int) or pw[0] % 3:
+        return None, f"perception_weight has unusable shape {pw}"
+    channel_n = pw[0] // 3
+    cond = inputs.get("cond")
+    cond_n = int(cond[1]) if cond and isinstance(cond[1], int) else 0
+
+    layers: list[tuple[int, list[int]]] = []
+    for init in graph.initializer:
+        if init.name.startswith("ca.update.") and init.name.endswith(".weight"):
+            idx = int(init.name.split(".")[2])
+            layers.append((idx, [int(d) for d in init.dims]))
+    if not layers:
+        return None, "no ca.update.*.weight initializers"
+    layers.sort()
+    hidden_n = layers[0][1][0]
+    hidden_layers = len(layers)
+    perception_n = layers[0][1][1]
+    if perception_n != 3 * channel_n + cond_n:
+        return None, f"update[0] fan-in {perception_n} != 3C+cond_n ({3 * channel_n + cond_n})"
+    if [idx for idx, _ in layers] != [2 * i for i in range(hidden_layers)]:
+        return None, f"unexpected update layer indices {[i for i, _ in layers]}"
+
+    wrap = True
+    for node in graph.node:
+        if node.op_type == "Pad":
+            for attr in node.attribute:
+                if attr.name == "mode" and attr.s == b"constant":
+                    wrap = False
+
+    try:
+        spec = ModelSpec(
+            channel_n=channel_n,
+            hidden_n=hidden_n,
+            hidden_layers=hidden_layers,
+            cond_n=cond_n,
+            learn_perception=bool(meta.get("learn_perception", False)),
+            wrap=wrap,
+            fire_rate=float(meta.get("fire_rate", 0.5)),
+        )
+    except ValueError as exc:
+        return None, f"derived spec is invalid: {exc}"
+
+    blob = model_dir / "weights.bin"
+    if blob.is_file() and blob.stat().st_size != spec.weights_count() * 4:
+        return None, (
+            f"weights.bin is {blob.stat().st_size} bytes but the graph implies "
+            f"{spec.weights_count() * 4} ({spec})"
+        )
+    return spec, ""
+
+
+def _run_layout(meta: dict[str, Any]) -> tuple[int | None, int | None]:
+    """``(target_size, padding)`` from the run's own ``train.json``, if reachable."""
+    checkpoint = meta.get("source_checkpoint")
+    if not checkpoint:
+        return None, None
+    train_json = Path(checkpoint).parent / "train.json"
+    if not train_json.is_file():
+        return None, None
+    try:
+        data = json.loads(train_json.read_text())
+    except json.JSONDecodeError:
+        return None, None
+    size, pad = data.get("target_size"), data.get("padding")
+    return (int(size) if size is not None else None, int(pad) if pad is not None else None)
+
+
+def fix_meta(
+    meta: dict[str, Any], spec: ModelSpec, layout: tuple[int | None, int | None] = (None, None)
+) -> dict[str, Any]:
+    """Return ``meta`` with every spec-owned field rewritten from ``spec``.
+
+    Only fields for which there is evidence are written: the shape comes from
+    ``spec`` (derived from the graph + blob), the canvas split comes from the run's
+    ``train.json``. Nothing is invented -- a value we cannot reconstruct is left
+    absent so the check keeps reporting it.
+    """
     fixed = dict(meta)
     fixed.update(spec.meta_fields())
     fixed["weights"] = spec.weights_meta(str(meta.get("weights", {}).get("file", "weights.bin")))
-    if fixed.get("target_size") is None or fixed.get("padding") is None:
-        # Legacy export: recover the canvas layout from the grid it was grown on.
-        grid = int(fixed.get("grid") or 0)
-        target_size = int(fixed.get("target_size") or min(40, grid))
+    target_size, padding = layout
+    if fixed.get("target_size") is None and target_size is not None:
         fixed["target_size"] = target_size
-        fixed["padding"] = int(fixed.get("padding") or max((grid - target_size) // 2, 0))
+    if fixed.get("padding") is None and padding is not None:
+        fixed["padding"] = padding
     return fixed
 
 
@@ -301,8 +405,12 @@ def check_exports(
         meta, problems = check_model(model_dir, graph=graph)
         if fix and meta is not None:
             notes: list[Problem] = []
-            spec = ModelSpec.from_meta(meta)
-            fixed = fix_meta(meta, spec)
+            derived, why = derive_spec(model_dir, meta)
+            if derived is None:
+                notes.append(_warn(f"--fix skipped: {why}"))
+                fixed = meta
+            else:
+                fixed = fix_meta(meta, derived, _run_layout(meta))
             if fixed != meta:
                 (model_dir / "meta.json").write_text(json.dumps(fixed, indent=2) + "\n")
                 meta = fixed
