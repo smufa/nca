@@ -23,6 +23,7 @@
     "file": "weights.bin",
     "channel_n": 12,
     "hidden_n": 128,
+    "hidden_layers": 1,
     "perception_n": 36,
     "perception_padded_n": 36,
     "offsets": {
@@ -34,5 +35,10 @@
     "count": 6284
   },
   "size_bytes": 41533,
-  "git_rev": "e7f5a6c"
+  "git_rev": "e7f5a6c",
+  "hidden_layers": 1,
+  "cond_n": 0,
+  "learn_perception": false,
+  "target_size": 40,
+  "padding": 12
 }

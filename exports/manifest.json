@@ -29,6 +29,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -38,7 +41,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -69,6 +77,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -78,7 +89,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -109,6 +125,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -118,7 +137,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -149,6 +173,7 @@
           "file": "weights.bin",
           "channel_n": 10,
           "hidden_n": 128,
+          "hidden_layers": 1,
           "perception_n": 30,
           "perception_padded_n": 32,
           "offsets": {
@@ -160,7 +185,12 @@
           "count": 5514
         },
         "size_bytes": 37427,
-        "git_rev": "e7f5a6c"
+        "git_rev": "e7f5a6c",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 12
       }
     },
     {
@@ -191,6 +221,7 @@
           "file": "weights.bin",
           "channel_n": 12,
           "hidden_n": 128,
+          "hidden_layers": 1,
           "perception_n": 36,
           "perception_padded_n": 36,
           "offsets": {
@@ -202,7 +233,12 @@
           "count": 6284
         },
         "size_bytes": 41533,
-        "git_rev": "e7f5a6c"
+        "git_rev": "e7f5a6c",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 12
       }
     },
     {
@@ -210,17 +246,54 @@
       "path": "crab_c16_h128/model.onnx",
       "meta": {
         "id": "crab_c16_h128",
-        "created": "2026-10-22T02:19:15",
+        "created": "2026-10-23T00:29:29",
         "channel_n": 16,
+        "cond_n": 0,
+        "hidden_layers": 1,
         "hidden_n": 128,
         "fire_rate": 0.5,
+        "learn_perception": false,
+        "perception_kernel": [
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          -0.125,
+          0.0,
+          0.125,
+          -0.25,
+          0.0,
+          0.25,
+          -0.125,
+          0.0,
+          0.125,
+          -0.125,
+          -0.25,
+          -0.125,
+          0.0,
+          0.0,
+          0.0,
+          0.125,
+          0.25,
+          0.125
+        ],
         "num_parameters": 8336,
         "grid": 64,
         "dynamic_shape": true,
+        "target_size": 40,
+        "padding": 12,
         "wrap": true,
         "opset": 19,
         "experiment": "regenerating",
         "target": "emoji:1f980",
+        "targets": [
+          "emoji:1f980"
+        ],
         "source_checkpoint": "runs/cap_c16_h128/ckpt_final.pt",
         "torch_version": "2.14.1+cpu",
         "onnxruntime_version": "1.31.0",
@@ -233,6 +306,7 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
           "perception_n": 48,
           "perception_padded_n": 48,
           "offsets": {
@@ -243,8 +317,8 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
-        "git_rev": "e7f5a6c"
+        "size_bytes": 49782,
+        "git_rev": "43019bb"
       }
     },
     {
@@ -275,6 +349,7 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 16,
+          "hidden_layers": 1,
           "perception_n": 48,
           "perception_padded_n": 48,
           "offsets": {
@@ -286,7 +361,12 @@
           "count": 1056
         },
         "size_bytes": 20609,
-        "git_rev": "e7f5a6c"
+        "git_rev": "e7f5a6c",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 12
       }
     },
     {
@@ -317,6 +397,7 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 32,
+          "hidden_layers": 1,
           "perception_n": 48,
           "perception_padded_n": 48,
           "offsets": {
@@ -328,7 +409,12 @@
           "count": 2096
         },
         "size_bytes": 24771,
-        "git_rev": "e7f5a6c"
+        "git_rev": "e7f5a6c",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 12
       }
     },
     {
@@ -359,6 +445,7 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 64,
+          "hidden_layers": 1,
           "perception_n": 48,
           "perception_padded_n": 48,
           "offsets": {
@@ -370,7 +457,12 @@
           "count": 4176
         },
         "size_bytes": 33091,
-        "git_rev": "e7f5a6c"
+        "git_rev": "e7f5a6c",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 12
       }
     },
     {
@@ -401,6 +493,7 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 8,
+          "hidden_layers": 1,
           "perception_n": 48,
           "perception_padded_n": 48,
           "offsets": {
@@ -412,7 +505,12 @@
           "count": 536
         },
         "size_bytes": 18529,
-        "git_rev": "e7f5a6c"
+        "git_rev": "e7f5a6c",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 12
       }
     },
     {
@@ -443,6 +541,7 @@
           "file": "weights.bin",
           "channel_n": 6,
           "hidden_n": 128,
+          "hidden_layers": 1,
           "perception_n": 18,
           "perception_padded_n": 20,
           "offsets": {
@@ -454,7 +553,12 @@
           "count": 3462
         },
         "size_bytes": 29218,
-        "git_rev": "e7f5a6c"
+        "git_rev": "e7f5a6c",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 12
       }
     },
     {
@@ -485,6 +589,7 @@
           "file": "weights.bin",
           "channel_n": 8,
           "hidden_n": 128,
+          "hidden_layers": 1,
           "perception_n": 24,
           "perception_padded_n": 24,
           "offsets": {
@@ -496,7 +601,12 @@
           "count": 4232
         },
         "size_bytes": 33322,
-        "git_rev": "e7f5a6c"
+        "git_rev": "e7f5a6c",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 12
       }
     },
     {
@@ -527,6 +637,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -536,7 +649,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -597,6 +715,7 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
           "perception_n": 48,
           "perception_padded_n": 48,
           "offsets": {
@@ -608,7 +727,11 @@
           "count": 8336
         },
         "size_bytes": 49818,
-        "git_rev": "e82796f"
+        "git_rev": "e82796f",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -669,6 +792,7 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
           "perception_n": 48,
           "perception_padded_n": 48,
           "offsets": {
@@ -680,7 +804,11 @@
           "count": 8336
         },
         "size_bytes": 49782,
-        "git_rev": "3ba443e"
+        "git_rev": "3ba443e",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -711,6 +839,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -720,7 +851,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -751,6 +887,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -760,7 +899,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -791,6 +935,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -800,7 +947,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -831,6 +983,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -840,7 +995,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -871,6 +1031,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -880,7 +1043,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -910,6 +1078,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -919,7 +1090,12 @@
           "count": 8336
         },
         "size_bytes": 49374,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -950,6 +1126,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -959,7 +1138,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -1025,6 +1209,7 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
           "perception_n": 50,
           "perception_padded_n": 52,
           "offsets": {
@@ -1036,7 +1221,10 @@
           "count": 8848
         },
         "size_bytes": 54178,
-        "git_rev": "b58eb80"
+        "git_rev": "b58eb80",
+        "hidden_layers": 1,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -1104,6 +1292,7 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
           "perception_n": 52,
           "perception_padded_n": 52,
           "offsets": {
@@ -1115,7 +1304,10 @@
           "count": 8848
         },
         "size_bytes": 55202,
-        "git_rev": "b58eb80"
+        "git_rev": "b58eb80",
+        "hidden_layers": 1,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -1185,6 +1377,7 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
           "perception_n": 54,
           "perception_padded_n": 56,
           "offsets": {
@@ -1196,7 +1389,10 @@
           "count": 9360
         },
         "size_bytes": 56226,
-        "git_rev": "b58eb80"
+        "git_rev": "b58eb80",
+        "hidden_layers": 1,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -1268,6 +1464,7 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
           "perception_n": 56,
           "perception_padded_n": 56,
           "offsets": {
@@ -1279,7 +1476,10 @@
           "count": 9360
         },
         "size_bytes": 57250,
-        "git_rev": "b58eb80"
+        "git_rev": "b58eb80",
+        "hidden_layers": 1,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -1367,7 +1567,9 @@
           "count": 25872
         },
         "size_bytes": 126279,
-        "git_rev": "fb917cb"
+        "git_rev": "fb917cb",
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -1452,7 +1654,9 @@
           "count": 18704
         },
         "size_bytes": 94628,
-        "git_rev": "fb917cb"
+        "git_rev": "fb917cb",
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -1518,6 +1722,7 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
           "perception_n": 50,
           "perception_padded_n": 52,
           "offsets": {
@@ -1529,7 +1734,10 @@
           "count": 8848
         },
         "size_bytes": 54178,
-        "git_rev": "1577af4"
+        "git_rev": "1577af4",
+        "hidden_layers": 1,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -1597,6 +1805,7 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
           "perception_n": 52,
           "perception_padded_n": 52,
           "offsets": {
@@ -1608,7 +1817,10 @@
           "count": 8848
         },
         "size_bytes": 55202,
-        "git_rev": "1577af4"
+        "git_rev": "1577af4",
+        "hidden_layers": 1,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -1678,6 +1890,7 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
           "perception_n": 54,
           "perception_padded_n": 56,
           "offsets": {
@@ -1689,7 +1902,10 @@
           "count": 9360
         },
         "size_bytes": 56226,
-        "git_rev": "1577af4"
+        "git_rev": "1577af4",
+        "hidden_layers": 1,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -1761,6 +1977,7 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
           "perception_n": 56,
           "perception_padded_n": 56,
           "offsets": {
@@ -1772,7 +1989,10 @@
           "count": 9360
         },
         "size_bytes": 57250,
-        "git_rev": "1577af4"
+        "git_rev": "1577af4",
+        "hidden_layers": 1,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -1803,6 +2023,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -1812,7 +2035,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "b87a6ff"
+        "git_rev": "b87a6ff",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -1843,6 +2071,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -1852,7 +2083,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "b87a6ff"
+        "git_rev": "b87a6ff",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -1883,6 +2119,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -1892,7 +2131,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "b87a6ff"
+        "git_rev": "b87a6ff",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -1923,6 +2167,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -1932,7 +2179,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -1963,6 +2215,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -1972,7 +2227,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -2003,6 +2263,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -2012,7 +2275,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -2043,6 +2311,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -2052,7 +2323,12 @@
           "count": 8336
         },
         "size_bytes": 48032,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 32,
+        "padding": 0
       }
     },
     {
@@ -2083,6 +2359,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -2092,7 +2371,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -2123,6 +2407,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -2132,7 +2419,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -2163,6 +2455,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -2172,7 +2467,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -2203,6 +2503,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -2212,7 +2515,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -2243,6 +2551,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -2252,7 +2563,12 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "99a3538"
+        "git_rev": "99a3538",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     },
     {
@@ -2283,6 +2599,9 @@
           "file": "weights.bin",
           "channel_n": 16,
           "hidden_n": 128,
+          "hidden_layers": 1,
+          "perception_n": 48,
+          "perception_padded_n": 48,
           "offsets": {
             "w1": 0,
             "b1": 6144,
@@ -2292,9 +2611,14 @@
           "count": 8336
         },
         "size_bytes": 49741,
-        "git_rev": "b87a6ff"
+        "git_rev": "b87a6ff",
+        "hidden_layers": 1,
+        "cond_n": 0,
+        "learn_perception": false,
+        "target_size": 40,
+        "padding": 16
       }
     }
   ],
-  "generated": "2026-10-22T16:48:12"
+  "generated": "2026-10-23T00:29:29"
 }

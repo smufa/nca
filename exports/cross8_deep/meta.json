@@ -80,5 +80,7 @@
     "count": 25872
   },
   "size_bytes": 126279,
-  "git_rev": "fb917cb"
+  "git_rev": "fb917cb",
+  "target_size": 40,
+  "padding": 16
 }
