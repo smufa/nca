@@ -103,14 +103,20 @@ export function modelGroup(m: ManifestModel): ModelGroup {
   // of each batch is asked to convert one grown target into another).
   mt = /^multi(\d+)$/.exec(id);
   if (mt) {
-    return { group: 'Multi-target', label: `${mt[1]} emoji`, order: Number(mt[1]) };
+    const n = Number(mt[1]);
+    return { group: 'Multi-target', label: `${n} emoji`, order: 1000 * n };
   }
-  mt = /^cross(\d+)$/.exec(id);
+  mt = /^cross(\d+)(?:_(wide|deep))?$/.exec(id);
   if (mt) {
+    const n = Number(mt[1]);
+    const variant = mt[2] ? ` · ${mt[2]}` : '';
+    // same N groups together, expanding (plain, wide, deep); '' sorts before the rest
+    const sub = mt[2] === 'wide' ? 1 : mt[2] === 'deep' ? 2 : 0;
+    // N first, then variant; scaled so all 8 wide/deep land after the plain set
     return {
       group: 'Multi-target',
-      label: `${mt[1]} emoji · cross`,
-      order: 100 + Number(mt[1]),
+      label: `${n} emoji · cross${variant}`,
+      order: 1000 * n + sub,
     };
   }
   if (id === 'smile-demo') return { group: 'Demos', label: 'smile', order: 0 };

@@ -272,7 +272,30 @@ comparable across regimes and both models score well - which is why the check is
 to switch the target mid-run in the playground.
 
 The frontend's `setCond()` therefore does **not** reset the state: switching the
-Target picker converts in place, which is the only way to see this.
+Target picker converts in place, which is the only way to see this. The picker is a
+vector of sliders (-1..1), not a one-hot selector, so out-of-distribution mixtures
+(0.5/0.5) can be tried too.
+
+### Wider vs deeper for 8 emoji (`cross8_wide` / `cross8_deep`)
+
+Both 8-target, `--mismatch-p 0.3`, same schedule; baseline `cross8` is hidden=128,
+1 layer, 9360 params.
+
+| run | shape | params | min loss | 8/8 correct | converts | shader |
+|---|---|---:|---:|---|---|---|
+| `cross8` | h128 x1 | 9360 | 5.8e-3 | yes | yes | 1.8 ms |
+| `cross8_wide` | h256 x1 | 18.7k | 3.8e-3 | yes | yes | 3.3 ms |
+| `cross8_deep` | h128 x2 | 25.9k | **2.7e-3** | yes | yes | 10.2 ms |
+
+All three grow the right emoji for every index and convert 0->1, so neither change
+broke conditioning. Depth is the better use of capacity (2.7e-3 vs 3.8e-3 at 38%
+more params), and the visual difference is subtle - the loss ranking is the clearer
+signal here, but they do have different budgets, so this does not isolate width
+from depth.
+
+Shader cost is worth knowing: the `hidden -> hidden` layer is ~2.7x the `W1` work and
+the rest is register pressure from holding the hidden vector, so `cross8_deep` runs
+at ~98 steps/s vs ~620 for a 128-wide single-layer model. Still interactive.
 
 ## Gotchas
 
