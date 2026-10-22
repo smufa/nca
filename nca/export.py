@@ -47,6 +47,7 @@ class ExportStep(nn.Module):
         perception_weight: torch.Tensor,
         fire_mask: torch.Tensor,
         step_size: torch.Tensor,
+        cond: torch.Tensor | None = None,
     ) -> torch.Tensor:
         wrap = self.ca.wrap
         pre = get_living_mask(x, wrap)
@@ -58,6 +59,10 @@ class ExportStep(nn.Module):
             padding=0 if wrap else 1,
             groups=self.ca.channel_n,
         )
+        if self.ca.cond_n:
+            y = torch.cat(
+                [y, cond.expand(-1, -1, y.shape[-2], y.shape[-1])], dim=1
+            )
         dx = self.ca.update(y) * step_size
         x = x + dx * fire_mask
         post = get_living_mask(x, wrap)
@@ -65,19 +70,30 @@ class ExportStep(nn.Module):
 
 
 def infer_dims(state_dict: dict) -> tuple[int, int]:
-    weight = state_dict["update.0.weight"]
-    return weight.shape[1] // 3, weight.shape[0]
+    """Return ``(channel_n, hidden_n)`` from the update-rule weights.
+
+    ``update.0`` takes ``3C + cond_n`` inputs, so the channel count has to come
+    from the *output* projection, not from the first layer's fan-in.
+    """
+    hidden_n = state_dict["update.0.weight"].shape[0]
+    channel_n = state_dict["update.2.weight"].shape[0]
+    return int(channel_n), int(hidden_n)
 
 
 def _load_ca(checkpoint: str | Path, wrap: bool = True) -> NeuralCA:
     state = torch.load(checkpoint, map_location="cpu")
     channel_n, hidden_n = infer_dims(state)
-    # A --learn-perception checkpoint carries the `sobel` parameter.
+    # A --learn-perception checkpoint carries the `sobel` parameter; a conditional
+    # one has a wider update.0 fan-in than 3C.
+    cond_n = int(state["update.0.weight"].shape[1]) - 3 * channel_n
+    if cond_n < 0:  # pragma: no cover - defensive
+        raise ValueError(f"bad update.0 fan-in for channel_n={channel_n}")
     ca = NeuralCA(
         channel_n=channel_n,
         hidden_n=hidden_n,
         wrap=wrap,
         learn_perception="sobel" in state,
+        cond_n=cond_n,
     )
     ca.load_state_dict(state)
     ca.eval()
@@ -90,6 +106,7 @@ def export_step(
     grid: int,
     dynamic: bool = True,
     opset: int = DEFAULT_OPSET,
+    cond_n: int = 0,
 ) -> None:
     from torch.export import Dim
 
@@ -102,7 +119,7 @@ def export_step(
     step_size = torch.tensor(1.0)
 
     # dynamic_shapes is positional, matching forward()'s args:
-    # (x, perception_weight, fire_mask, step_size). None = leave static.
+    # (x, perception_weight, fire_mask, step_size[, cond]). None = leave static.
     dynamic_shapes = None
     if dynamic:
         batch, height, width = Dim("batch"), Dim("height"), Dim("width")
@@ -113,11 +130,21 @@ def export_step(
             None,
         )
 
+    args = [x, weight, fire_mask, step_size]
+    names = ["x", "perception_weight", "fire_mask", "step_size"]
+    if cond_n:
+        # A conditional model gets one extra input: the [B, cond_n, 1, 1] one-hot
+        # selector, broadcast over the grid inside the step.
+        args.append(torch.zeros(1, cond_n, 1, 1))
+        names.append("cond")
+        if dynamic_shapes is not None:
+            dynamic_shapes = dynamic_shapes + ({0: batch},)
+
     torch.onnx.export(
         step,
-        (x, weight, fire_mask, step_size),
+        tuple(args),
         str(path),
-        input_names=["x", "perception_weight", "fire_mask", "step_size"],
+        input_names=names,
         output_names=["x_next"],
         dynamic_shapes=dynamic_shapes,
         opset_version=opset,
@@ -132,7 +159,11 @@ def _make_fire_masks(steps: int, grid: int, rng: np.random.Generator) -> list[np
 
 @torch.no_grad()
 def _torch_rollout(
-    ca: NeuralCA, grid: int, masks: list[np.ndarray], channel_n: int
+    ca: NeuralCA,
+    grid: int,
+    masks: list[np.ndarray],
+    channel_n: int,
+    cond: torch.Tensor | None = None,
 ) -> np.ndarray:
     step = ExportStep(ca).eval()
     x = torch.zeros(1, channel_n, grid, grid)
@@ -140,7 +171,7 @@ def _torch_rollout(
     weight = ca.perception_weight()
     s = torch.tensor(1.0)
     for m in masks:
-        x = step(x, weight, torch.from_numpy(m), s)
+        x = step(x, weight, torch.from_numpy(m), s, cond)
     return x.numpy()
 
 
@@ -150,6 +181,7 @@ def _onnx_rollout(
     masks: list[np.ndarray],
     channel_n: int,
     weight: np.ndarray,
+    cond: np.ndarray | None = None,
 ) -> np.ndarray:
     import onnxruntime as ort
 
@@ -157,15 +189,15 @@ def _onnx_rollout(
     x = np.zeros((1, channel_n, grid, grid), np.float32)
     x[0, 3:, grid // 2, grid // 2] = 1.0
     for m in masks:
-        x = sess.run(
-            ["x_next"],
-            {
-                "x": x,
-                "perception_weight": weight,
-                "fire_mask": m,
-                "step_size": np.array(1.0, dtype=np.float32),
-            },
-        )[0]
+        feeds = {
+            "x": x,
+            "perception_weight": weight,
+            "fire_mask": m,
+            "step_size": np.array(1.0, dtype=np.float32),
+        }
+        if cond is not None:
+            feeds["cond"] = cond
+        x = sess.run(["x_next"], feeds)[0]
     return x
 
 
@@ -180,12 +212,20 @@ def verify(
     channel_n = ca.channel_n
     rng = np.random.default_rng(0)
     weight = ca.perception_weight().detach().numpy()
+    # Parity only needs *some* consistent selector; use the first target.
+    cond = None
+    if ca.cond_n:
+        cond = torch.zeros(1, ca.cond_n, 1, 1)
+        cond[0, 0] = 1.0
     grids = [grid, grid + 8] if dynamic else [grid]
     results = {}
     for g in grids:
         masks = _make_fire_masks(steps, g, rng)
-        ref = _torch_rollout(ca, g, masks, channel_n)
-        out = _onnx_rollout(onnx_path, g, masks, channel_n, weight)
+        ref = _torch_rollout(ca, g, masks, channel_n, cond)
+        out = _onnx_rollout(
+            onnx_path, g, masks, channel_n, weight,
+            cond.numpy() if cond is not None else None,
+        )
         diff = float(np.max(np.abs(ref - out)))
         results[str(g)] = diff
         status = "ok" if diff < 1e-4 else "FAIL"
@@ -234,12 +274,15 @@ def _save_weights(ca: NeuralCA, model_dir: Path) -> dict:
 
     Layout in floats: ``W1 [hidden, P4]``, ``b1 [hidden]``, ``W2 [C, hidden]``,
     ``b2 [C]`` - row-major, matching ``ca.update``. ``P4`` is the logical
-    perception width ``3C`` rounded up to a multiple of 4 so the shader can read
-    ``W1`` rows as ``vec4`` (zero padding columns are added when ``3C % 4``).
+    perception width (``3C + cond_n``) rounded up to a multiple of 4, so the shader
+    can read ``W1`` rows as ``vec4`` (zero padding columns are added when it is not
+    a multiple of 4).
     For the paper size (``C=16``) ``P4 == 3C == 48`` so the layout is unchanged.
     """
     C = int(ca.channel_n)
-    w1 = ca.update[0].weight.detach().reshape(ca.update[0].out_channels, 3 * C)
+    cond_n = int(ca.cond_n)
+    p = 3 * C + cond_n  # perception width fed to update[0]
+    w1 = ca.update[0].weight.detach().reshape(ca.update[0].out_channels, p)
     b1 = ca.update[0].bias.detach().reshape(-1)
     w2 = ca.update[2].weight.detach().reshape(ca.update[2].out_channels, -1)
     b2 = ca.update[2].bias.detach().reshape(-1)
@@ -248,7 +291,6 @@ def _save_weights(ca: NeuralCA, model_dir: Path) -> dict:
     w2 = w2.cpu().numpy().astype("<f4")
     b2 = b2.cpu().numpy().astype("<f4")
 
-    p = 3 * C
     p4 = (p + 3) // 4 * 4  # pad each perception row to a vec4 boundary
     if p4 != p:
         w1 = np.pad(w1, ((0, 0), (0, p4 - p)))
@@ -284,6 +326,7 @@ def export_one(
     do_verify: bool,
     verify_steps: int,
     wrap: bool = True,
+    targets: list[str] | None = None,
 ) -> dict:
     import onnx
     import onnxruntime as ort
@@ -300,7 +343,7 @@ def export_one(
 
     onnx_path = model_dir / "model.onnx"
     print(f"Exporting {model_id} (grid {grid}, dynamic={dynamic}, opset {opset})")
-    export_step(ca, onnx_path, grid, dynamic=dynamic, opset=opset)
+    export_step(ca, onnx_path, grid, dynamic=dynamic, opset=opset, cond_n=ca.cond_n)
 
     parity = None
     if do_verify:
@@ -316,6 +359,7 @@ def export_one(
         "id": model_id,
         "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "channel_n": ca.channel_n,
+        "cond_n": int(ca.cond_n),
         "hidden_n": infer_dims(ca.state_dict())[1],
         "fire_rate": ca.fire_rate,
         "learn_perception": bool(getattr(ca, "learn_perception", False)),
@@ -330,6 +374,9 @@ def export_one(
         "opset": opset,
         "experiment": experiment,
         "target": target,
+        # Full spec list for a conditional (--targets) run, so the playground can
+        # label its target selector. Falls back to the single target.
+        "targets": list(targets) if targets else [target],
         "source_checkpoint": str(checkpoint),
         "torch_version": torch.__version__,
         "onnxruntime_version": ort.__version__,
@@ -366,6 +413,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--experiment", default="unknown")
     p.add_argument("--target", default="unknown")
     p.add_argument(
+        "--targets",
+        nargs="+",
+        default=None,
+        metavar="SPEC",
+        help="target spec list for a conditional model (metadata only)",
+    )
+    p.add_argument(
         "--no-wrap",
         action="store_true",
         help="use zero (non-periodic) boundaries instead of circular wrapping",
@@ -392,6 +446,7 @@ def main(argv: list[str] | None = None) -> None:
         do_verify=not args.no_verify,
         verify_steps=args.verify_steps,
         wrap=not args.no_wrap,
+        targets=args.targets,
     )
 
 
