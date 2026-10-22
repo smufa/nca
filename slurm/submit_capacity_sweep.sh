@@ -30,6 +30,7 @@ submit() { # name channels hidden
     --target "$TARGET" --experiment regenerating \
     --target-size 40 --padding 16 \
     --batch-size 16 --iterations 8000 --train-steps 64 96 \
+    --amp bf16 \
     --ckpt-every 500 --log-every 25 \
     --channels "$2" --hidden "$3" \
     --run-name "cap_c${2}_h${3}"

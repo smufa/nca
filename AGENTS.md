@@ -133,6 +133,14 @@ Findings so far (Intel UHD 620):
      real precision risk (the bench settles it immediately).
   3. **Split hidden units across workgroups** and reduce `dx` with atomics to cut
      per-thread weight reads.
+- The kernel is **size-generic**: `C`, `NP4`, `W1S4`, `HG` are WGSL `override`
+  constants set per pipeline. They must stay *compile-time* — dynamic loop bounds
+  cost ~1.9×. Export pads each `W1` row to `3C → ceil(3C/4)*4` floats so `vec4`
+  loads stay aligned; at `C=16` that is a no-op, so old `weights.bin` is unchanged.
+  Supported: `4 ≤ C ≤ 16`, `hidden % 4 == 0` (`ShaderRunner.supports`), else the
+  frontend falls back to WASM.
+- The bench's `--reference` reports a **1-step** diff as the correctness gate; the
+  N-step diff is larger because the CA is chaotic.
 
 ## Training performance (measured on a MIG slice, 72×72 / batch 16)
 
@@ -143,6 +151,25 @@ Findings so far (Intel UHD 620):
   the whole unroll sequence is *slower* (large warmup, specialised per step count).
 - The unroll is compute/backward-bound on that small slice, not Python-bound, so
   further speed-ups would come from a larger batch (better utilisation) or bf16.
+
+## Model capacity (crab / regenerating, 8k iters)
+
+The paper size (C=16, hidden=128, **8336 params**) reaches min loss **2.0e-4**. The
+sweep models are in `exports/crab_c*_h*`:
+
+| hidden | C | params | min loss | ×base |
+|---:|---:|---:|---:|---:|
+| 128 | 16 | 8336 | 2.0e-4 | 1 × |
+| 128 | 12 | 6284 | 2.4e-3 | 12 × |
+| 128 | 8 | 4232 | 5.7e-3 | 28 × |
+| 64 | 16 | 4176 | 8.8e-3 | 44 × |
+| 128 | 6 | 3206 | 9.2e-3 | 46 × |
+| 32 | 16 | 2096 | 1.3e-2 | 63 × |
+| 16 | 16 | 1056 | 2.0e-2 | 99 × |
+| 8 | 16 | 536 | 1.9e-2 | 96 × |
+
+Channels are the cheaper axis to cut at equal params (C=12 beats hidden=64); below
+~4k params quality falls off a cliff.
 
 ## Gotchas
 
