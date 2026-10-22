@@ -192,6 +192,32 @@ def prepare_target(target_rgba: np.ndarray, padding: int) -> torch.Tensor:
     return tensor
 
 
+def prepare_targets(
+    specs: list[str], max_size: int = 40, padding: int = 8
+) -> torch.Tensor:
+    """Load several target specs into one ``[N, 4, H', W']`` tensor.
+
+    Emoji glyphs are not all square, so every target is centred in a
+    ``max_size`` x ``max_size`` canvas before the border is added. That keeps all
+    of them on the same grid, which is what a conditional model needs.
+    """
+    canvases = []
+    for spec in specs:
+        arr = np.asarray(load_target(spec, max_size=max_size), dtype=np.float32)
+        h, w = arr.shape[:2]
+        if h > max_size or w > max_size:  # pragma: no cover - defensive
+            raise ValueError(f"{spec}: target {h}x{w} exceeds max_size={max_size}")
+        canvas = np.zeros((max_size, max_size, 4), np.float32)
+        y0, x0 = (max_size - h) // 2, (max_size - w) // 2
+        canvas[y0 : y0 + h, x0 : x0 + w] = arr
+        canvases.append(canvas)
+    padded = np.pad(
+        np.stack(canvases),
+        ((0, 0), (padding, padding), (padding, padding), (0, 0)),
+    )
+    return torch.from_numpy(padded).permute(0, 3, 1, 2).contiguous()
+
+
 def make_seed(height: int, width: int, channel_n: int = 16) -> torch.Tensor:
     """A single seed cell in the middle with RGB=0 and all other channels=1."""
     seed = torch.zeros(channel_n, height, width)

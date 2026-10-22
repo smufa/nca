@@ -72,6 +72,7 @@ def growth_frames(
     device: torch.device,
     frame_every: int = 2,
     scale: int = 2,
+    cond: torch.Tensor | None = None,
 ) -> list[np.ndarray]:
     """Run the CA from a seed and collect rendered frames."""
     ca.eval()
@@ -81,7 +82,7 @@ def growth_frames(
         if i % frame_every == 0:
             frames.append(_resize(render(x)[0], scale))
         if i < steps:
-            x = ca(x)
+            x = ca(x, cond=cond)
     return frames
 
 

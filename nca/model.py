@@ -94,17 +94,23 @@ class NeuralCA(nn.Module):
         hidden_n: int = 128,
         wrap: bool = True,
         learn_perception: bool = False,
+        cond_n: int = 0,
     ) -> None:
         super().__init__()
         self.channel_n = channel_n
         self.fire_rate = fire_rate
         self.wrap = wrap
         self.learn_perception = learn_perception
+        # cond_n > 0 makes the CA conditional: a one-hot vector of length cond_n
+        # is appended to every cell's perception, telling the update rule *which*
+        # target to grow. It is a separate signal, not part of the state, so the
+        # living mask cannot zero it away.
+        self.cond_n = cond_n
 
-        # Perception output has 3 * channel_n channels; the update rule is a
-        # small MLP applied per-cell via 1x1 convolutions.
+        # Perception output has 3 * channel_n channels (+ cond_n for a conditional
+        # model); the update rule is a small MLP per cell via 1x1 convolutions.
         self.update = nn.Sequential(
-            nn.Conv2d(3 * channel_n, hidden_n, kernel_size=1),
+            nn.Conv2d(3 * channel_n + cond_n, hidden_n, kernel_size=1),
             nn.ReLU(),
             nn.Conv2d(hidden_n, channel_n, kernel_size=1),
         )
@@ -169,6 +175,7 @@ class NeuralCA(nn.Module):
         angle: float = 0.0,
         step_size: float = 1.0,
         update_mask: torch.Tensor | None = None,
+        cond: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """One CA step.
 
@@ -176,10 +183,19 @@ class NeuralCA(nn.Module):
         fire mask instead of drawing one here. Training pre-draws a whole batch
         of masks for the unroll, which removes one RNG kernel + one comparison
         per step and makes the step a pure function of its inputs.
+
+        ``cond`` (``[B, cond_n]`` or ``[B, cond_n, 1, 1]``) is the one-hot target
+        selector for a conditional model; it is broadcast over the grid.
         """
         pre_life_mask = get_living_mask(x, self.wrap)
 
         y = self.perceive(x, angle)
+        if self.cond_n:
+            if cond is None:
+                raise ValueError(f"model has cond_n={self.cond_n} but no cond was given")
+            if cond.dim() == 2:
+                cond = cond[:, :, None, None]
+            y = torch.cat([y, cond.expand(-1, -1, y.shape[-2], y.shape[-1])], dim=1)
         dx = self.update(y) * step_size
 
         if update_mask is None:

@@ -10,9 +10,9 @@ import numpy as np
 import torch
 
 from .model import NeuralCA
-from .targets import load_target, make_seed, prepare_target
+from .targets import make_seed, prepare_targets
 from .train import TrainConfig, train
-from .viz import render, save_image
+from .viz import render, save_image, tile
 
 EXPERIMENTS = {
     "growing": dict(use_pool=False, damage_n=0),
@@ -42,6 +42,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--target",
         default="emoji:🦎",
         help="target spec: emoji:🦎 | emoji:1f98e | image:path.png | shape:heart",
+    )
+    p.add_argument(
+        "--targets",
+        nargs="+",
+        default=None,
+        metavar="SPEC",
+        help="several targets -> a conditional model with a cond_n-way one-hot "
+        "selector (e.g. --targets emoji:1f980 emoji:1f419); overrides --target",
     )
     p.add_argument("--target-size", type=int, default=32, help="target image size")
     p.add_argument("--padding", type=int, default=8, help="border padding around target")
@@ -167,10 +175,11 @@ def main(argv: list[str] | None = None) -> None:
     if not args.lr_milestone:
         args.lr_milestone = [max(1, int(0.25 * args.iterations))]
 
-    # --- target ---------------------------------------------------------
-    target_rgba = load_target(args.target, max_size=args.target_size)
-    target = prepare_target(target_rgba, args.padding)
+    # --- targets ---------------------------------------------------------
+    specs = args.targets or [args.target]
+    target = prepare_targets(specs, max_size=args.target_size, padding=args.padding)
     _, _, h, w = target.shape
+    cond_n = len(specs) if len(specs) > 1 else 0
     seed = make_seed(h, w, args.channels)
 
     # --- output directory ----------------------------------------------
@@ -184,11 +193,9 @@ def main(argv: list[str] | None = None) -> None:
         out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save a preview of the padded target and the seed.
-    target_preview = render(target)[0]
-    seed_preview = render(seed.unsqueeze(0))[0]
-    save_image(target_preview, out_dir / "target.png")
-    save_image(seed_preview, out_dir / "seed.png")
+    # Save a preview of the padded target(s) and the seed.
+    save_image(tile(render(target), ncols=min(len(specs), 4)), out_dir / "target.png")
+    save_image(render(seed.unsqueeze(0))[0], out_dir / "seed.png")
     np.save(out_dir / "target.npy", target.numpy())
 
     cfg = TrainConfig(
@@ -222,9 +229,12 @@ def main(argv: list[str] | None = None) -> None:
         hidden_n=args.hidden,
         wrap=not args.no_wrap,
         learn_perception=args.learn_perception,
+        cond_n=cond_n,
     )
 
-    print(f"Target: {args.target}  ({args.target_size}px, padded to {h}x{w})")
+    print(f"Targets: {', '.join(specs)}  ({args.target_size}px, padded to {h}x{w})")
+    if cond_n:
+        print(f"Conditional model: cond_n={cond_n} one-hot selector")
     train(ca, target, seed, cfg, device, out_dir, resume=args.resume)
 
 

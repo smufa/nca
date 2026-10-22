@@ -80,6 +80,7 @@ def _train_step(
     target: torch.Tensor,
     cfg: TrainConfig,
     masks: torch.Tensor,
+    cond: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """One optimiser step over the unroll. Returns ``(final_state, loss)``.
 
@@ -89,7 +90,7 @@ def _train_step(
     with torch.autocast(
         device_type="cuda", dtype=torch.bfloat16, enabled=cfg.amp == "bf16"
     ):
-        x = forward(x0, masks)
+        x = forward(x0, masks, cond)
     loss = loss_fn(x, target)  # fp32, so the reported loss stays comparable
 
     optimizer.zero_grad(set_to_none=True)
@@ -173,20 +174,33 @@ def train(
     if cfg.compile:
 
         @torch.compile(dynamic=False)
-        def forward(x: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
+        def forward(
+            x: torch.Tensor, masks: torch.Tensor, cond: torch.Tensor | None
+        ) -> torch.Tensor:
             for k in range(masks.shape[0]):
-                x = ca(x, update_mask=masks[k])
+                x = ca(x, update_mask=masks[k], cond=cond)
             return x
 
     else:
 
-        def forward(x: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
+        def forward(
+            x: torch.Tensor, masks: torch.Tensor, cond: torch.Tensor | None
+        ) -> torch.Tensor:
             for k in range(masks.shape[0]):
-                x = ca(x, update_mask=masks[k])
+                x = ca(x, update_mask=masks[k], cond=cond)
             return x
     target = target.to(device)
     seed = seed.to(device)
     _, h, w = seed.shape
+
+    # A conditional run gets one target per emoji; every cell is told which one to
+    # grow via a one-hot vector appended to its perception.
+    n_targets = int(target.shape[0])
+    cond_n = n_targets if n_targets > 1 else 0
+    if ca.cond_n != cond_n:
+        raise ValueError(
+            f"model built with cond_n={ca.cond_n} but {n_targets} target(s) given"
+        )
 
     optimizer = torch.optim.Adam(ca.parameters(), lr=cfg.lr)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(
@@ -195,7 +209,12 @@ def train(
 
     pool = None
     if cfg.use_pool:
-        pool = SamplePool(seed.unsqueeze(0).repeat(cfg.pool_size, 1, 1, 1).contiguous())
+        pool_x = seed.unsqueeze(0).repeat(cfg.pool_size, 1, 1, 1).contiguous()
+        pool_cond = None
+        if cond_n:
+            # Spread the emoji round-robin over the initial pool.
+            pool_cond = F.one_hot(torch.arange(cfg.pool_size) % cond_n, cond_n).float().to(device)
+        pool = SamplePool(pool_x, pool_cond)
 
     # Keep at least one slot (the seed) untouched by damage.
     damage_n = min(cfg.damage_n, max(cfg.batch_size - 1, 0))
@@ -238,6 +257,7 @@ def train(
     print(
         f"Training on {device} | grid {h}x{w} | {ca.num_parameters} params | "
         f"pool={cfg.use_pool} damage={damage_n} noise={noise_n}x{cfg.noise_std} "
+        f"targets={n_targets} "
         f"| {cfg.iterations} iters"
     )
 
@@ -251,15 +271,26 @@ def train(
             pending.clear()
 
     for step in range(start_step, cfg.iterations):
+        tgt = target
         if pool is not None:
-            idx, x0 = pool.sample(cfg.batch_size, generator)
+            idx, x0, cond = pool.sample(cfg.batch_size, generator)
+            if cond is not None:
+                tgt = target[cond.argmax(dim=1)]
             with torch.no_grad():
-                rank = per_sample_loss(x0, target).argsort(descending=True)
+                rank = per_sample_loss(x0, tgt).argsort(descending=True)
             x0 = x0[rank]
             idx = idx[rank]
+            tgt = tgt[rank]
+            if cond is not None:
+                cond = cond[rank]
             # Always include the original seed so the model never forgets how
-            # to grow from scratch.
+            # to grow from scratch. Rotate which emoji it grows into so every
+            # target gets exercised from the seed.
             x0[0] = seed
+            if cond is not None:
+                sel = step % cond_n
+                cond[0] = F.one_hot(torch.tensor(sel, device=device), cond_n).float()
+                tgt[0] = target[sel]
             if damage_n:
                 dmg = make_circle_masks(damage_n, h, w, generator).to(device)
                 x0[-damage_n:] *= (1.0 - dmg).unsqueeze(1)
@@ -276,6 +307,12 @@ def train(
                 x0[lo:hi] = x0[lo:hi] + noise
         else:
             x0 = seed.unsqueeze(0).repeat(cfg.batch_size, 1, 1, 1).contiguous()
+            if cond_n:
+                sel = torch.arange(cfg.batch_size, device=device) % cond_n
+                cond = F.one_hot(sel, cond_n).float()
+                tgt = target[sel]
+            else:
+                cond = None
 
         n = int(
             torch.randint(cfg.train_steps_min, cfg.train_steps_max, (1,), generator=generator)
@@ -287,11 +324,11 @@ def train(
             <= ca.fire_rate
         )
 
-        x, loss_t = _train_step(ca, forward, optimizer, x0, target, cfg, masks)
+        x, loss_t = _train_step(ca, forward, optimizer, x0, tgt, cfg, masks, cond)
         scheduler.step()
 
         if pool is not None:
-            pool.commit(idx, x)
+            pool.commit(idx, x, cond)
 
         pending.append(loss_t)
 
@@ -310,10 +347,14 @@ def train(
             )
 
         if cfg.progress_every and step % cfg.progress_every == 0:
-            before = render(x0)
-            after = render(x)
-            montage = np.vstack([tile(before, ncols=cfg.batch_size), tile(after, ncols=cfg.batch_size)])
-            save_image(montage, out_dir / "progress" / f"batch_{step:06d}.png")
+            rows = [
+                tile(render(x0), ncols=cfg.batch_size),
+                tile(render(x), ncols=cfg.batch_size),
+            ]
+            if cond_n:
+                # third row: the target each column is being asked to grow
+                rows.append(tile(render(tgt), ncols=cfg.batch_size))
+            save_image(np.vstack(rows), out_dir / "progress" / f"batch_{step:06d}.png")
 
         if cfg.ckpt_every and (step + 1) % cfg.ckpt_every == 0:
             flush_losses()
@@ -335,6 +376,9 @@ def train(
 
     if cfg.make_gif:
         print("Rendering growth animation...", flush=True)
+        cond0 = None
+        if cond_n:
+            cond0 = F.one_hot(torch.tensor(0, device=device), cond_n).float().unsqueeze(0)
         frames = growth_frames(
             ca,
             seed,
@@ -342,6 +386,7 @@ def train(
             device=device,
             frame_every=cfg.gif_frame_every,
             scale=cfg.gif_scale,
+            cond=cond0,
         )
         save_gif(frames, out_dir / "growth.gif")
 
