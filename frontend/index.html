@@ -49,10 +49,11 @@
             <select id="model"></select>
           </label>
 
-          <label class="field" id="targetField" style="display: none">
-            <span>Target</span>
-            <select id="condSelect"></select>
-          </label>
+          <div class="field" id="targetField" style="display: none">
+            <span>Target mix <b id="condVal"></b></span>
+            <div id="condSliders" class="cond-sliders"></div>
+            <button id="condReset" type="button" class="cond-reset">one-hot 0</button>
+          </div>
 
           <label class="field">
             <span>Engine</span>

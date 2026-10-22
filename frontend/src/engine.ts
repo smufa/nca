@@ -34,6 +34,11 @@ export interface CaEngine {
   getKernels(): number[][];
   /** Conditional models: choose which target to grow (index into meta.targets). */
   setCond?(index: number): void;
+  /**
+   * Conditional models: set the conditioning vector directly, for values that are
+   * not one-hot (e.g. 0.5 of one target + 0.5 of another).
+   */
+  setCondVector?(values: number[]): void;
   dispose(): Promise<void>;
 
   /**

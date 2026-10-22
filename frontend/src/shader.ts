@@ -428,6 +428,13 @@ export class ShaderRunner implements CaEngine {
     this.writeCond();
   }
 
+  /** Set the conditioning vector directly (arbitrary mixture, not just one-hot). */
+  setCondVector(values: number[]): void {
+    if (!this.condN) return;
+    for (let i = 0; i < this.condN; i++) this.cond[i] = values[i] ?? 0;
+    this.writeCond();
+  }
+
   private writeCond(): void {
     if (this.condN) this.device.queue.writeBuffer(this.condBuf, 0, this.cond);
   }

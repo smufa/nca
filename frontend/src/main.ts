@@ -17,8 +17,14 @@ const viewsEl = el<HTMLDivElement>('views');
 const statusEl = el<HTMLSpanElement>('status');
 const perfEl = el<HTMLSpanElement>('perf');
 const modelSelect = el<HTMLSelectElement>('model');
-const targetField = el<HTMLLabelElement>('targetField');
-const condSelect = el<HTMLSelectElement>('condSelect');
+const targetField = el<HTMLDivElement>('targetField');
+const condSlidersEl = el<HTMLDivElement>('condSliders');
+const condValEl = el<HTMLElement>('condVal');
+const condResetBtn = el<HTMLButtonElement>('condReset');
+/** Sliders for the conditioning vector, one per one-hot component. */
+let condSliders: HTMLInputElement[] = [];
+/** Last conditioning vector, so switching engine/grid does not lose a mix. */
+let condState: number[] | null = null;
 const engineSelect = el<HTMLSelectElement>('engine');
 const gridSizeSelect = el<HTMLSelectElement>('gridSize');
 const playBtn = el<HTMLButtonElement>('play');
@@ -339,20 +345,83 @@ function prettySpec(spec: string): string {
   }
 }
 
-/** Populate the target picker for a conditional model, or hide it. */
+/**
+ * Build the conditioning-vector editor for a conditional model, or hide it.
+ *
+ * One slider per component, so the vector does not have to be one-hot: setting
+ * 0.5/0.5 asks the CA for a state between two targets, which is out of
+ * distribution and is the point of being able to move them freely.
+ */
 function setupCond(model: ManifestModel): void {
   const n = model.meta.cond_n ?? 0;
-  condSelect.innerHTML = '';
+  condSlidersEl.innerHTML = '';
+  condSliders = [];
   targetField.style.display = n ? '' : 'none';
   if (!n) return;
   const specs = model.meta.targets ?? [];
+  // Reuse the previous vector when the width matches (engine/grid switches), so a
+  // hand-tuned mix survives; otherwise start from a pure one-hot on component 0.
+  const keep = condState && condState.length === n ? condState : null;
   for (let i = 0; i < n; i++) {
-    const opt = document.createElement('option');
-    opt.value = String(i);
-    opt.textContent = specs[i] ? prettySpec(specs[i]) : `target ${i + 1}`;
-    condSelect.appendChild(opt);
+    const row = document.createElement('div');
+    row.className = 'row';
+
+    const label = document.createElement('label');
+    label.textContent = specs[i] ? prettySpec(specs[i]) : String(i + 1);
+    label.title = specs[i] ?? `target ${i + 1}`;
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '-1';
+    slider.max = '1';
+    slider.step = '0.05';
+    slider.value = keep ? String(keep[i]) : i === 0 ? '1' : '0';
+    slider.dataset.index = String(i);
+
+    const out = document.createElement('output');
+    out.textContent = slider.value;
+
+    slider.addEventListener('input', () => {
+      out.textContent = Number(slider.value).toFixed(2);
+      applyCondVector();
+    });
+
+    row.append(label, slider, out);
+    condSlidersEl.appendChild(row);
+    condSliders.push(slider);
   }
-  condSelect.value = '0';
+  updateCondLabel();
+}
+
+function readCondVector(): number[] {
+  return condSliders.map((s) => Number(s.value) || 0);
+}
+
+function updateCondLabel(): void {
+  const v = readCondVector();
+  condState = v;
+  condValEl.textContent = `[${v.map((x) => x.toFixed(2)).join(', ')}]`;
+}
+
+/** Push the slider values to the engine without touching the state. */
+function applyCondVector(): void {
+  updateCondLabel();
+  const v = readCondVector();
+  void whenIdle().then(() => {
+    if (runner?.setCondVector) runner.setCondVector(v);
+    else runner?.setCond?.(v.indexOf(Math.max(...v)));
+  });
+}
+
+/** Reset the conditioning vector to a pure one-hot on component 0. */
+function resetCondVector(): void {
+  condSliders.forEach((s, i) => {
+    s.value = i === 0 ? '1' : '0';
+    const out = s.nextElementSibling as HTMLOutputElement | null;
+    if (out) out.textContent = s.value;
+  });
+  applyCondVector();
+  drawAll();
 }
 
 function resetKernelsUI(): void {
@@ -630,6 +699,10 @@ async function selectModel(model: ManifestModel): Promise<void> {
     return;
   }
   setupCond(model);
+  // A fresh engine starts from its own default, so push the current mix into it.
+  if (condSliders.length && runner.setCondVector) {
+    runner.setCondVector(readCondVector());
+  }
   rebuildViews();
   resetKernelsUI();
   gridSizeSelect.value = String(runner.grid);
@@ -783,14 +856,7 @@ modelSelect.addEventListener('change', () => {
   if (m) void selectModel(m);
 });
 
-condSelect.addEventListener('change', () => {
-  // Switching the target keeps the state, so the CA converts in place. Wait for
-  // an in-flight step anyway, so the new one-hot applies cleanly from the next one.
-  void whenIdle().then(() => {
-    runner?.setCond?.(Number(condSelect.value) || 0);
-    drawAll();
-  });
-});
+condResetBtn.addEventListener('click', () => resetCondVector());
 
 engineSelect.value = ep;
 engineSelect.addEventListener('change', () => {

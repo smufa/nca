@@ -410,3 +410,52 @@ button.primary {
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
+
+/* Conditional-model target mix: one slider per one-hot component. */
+.cond-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cond-sliders .row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.cond-sliders .row label {
+  min-width: 22px;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.cond-sliders input[type='range'] {
+  flex: 1;
+  min-width: 0;
+}
+
+.cond-sliders output {
+  min-width: 30px;
+  text-align: right;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.cond-reset {
+  align-self: flex-start;
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.cond-reset:hover {
+  color: var(--text);
+}

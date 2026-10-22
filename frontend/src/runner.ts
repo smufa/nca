@@ -93,9 +93,16 @@ export class CaRunner implements CaEngine {
    */
   setCond(index: number): void {
     if (!this.condN) return;
-    const i = Math.max(0, Math.min(this.condN - 1, index | 0));
     const data = new Float32Array(this.condN);
-    data[i] = 1;
+    data[Math.max(0, Math.min(this.condN - 1, index | 0))] = 1;
+    this.condTensor = new ort.Tensor('float32', data, [1, this.condN, 1, 1]);
+  }
+
+  /** Set the conditioning vector directly (arbitrary mixture, not just one-hot). */
+  setCondVector(values: number[]): void {
+    if (!this.condN) return;
+    const data = new Float32Array(this.condN);
+    for (let i = 0; i < this.condN; i++) data[i] = values[i] ?? 0;
     this.condTensor = new ort.Tensor('float32', data, [1, this.condN, 1, 1]);
   }
 
