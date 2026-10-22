@@ -39,6 +39,9 @@ export class CaRunner implements CaEngine {
   private weight: Float32Array;
   private mask: Float32Array;
   private kernels: number[][] = CANONICAL_KERNELS.map((k) => k.slice());
+  /** Number of targets for a conditional model (0 = unconditional). */
+  private condN = 0;
+  private condTensor: ort.Tensor | null = null;
   private rng: Rng;
   private seed: number;
   private stepping = false;
@@ -74,6 +77,8 @@ export class CaRunner implements CaEngine {
     this.seed = seed;
     this.kernels = modelKernels(meta);
     this.weight = buildPerceptionWeight(this.channelN, this.kernels);
+    this.condN = meta.cond_n ?? 0;
+    if (this.condN) this.setCond(0);
     this.mask = new Float32Array(this.grid * this.grid);
     this.rng = mulberry32(seed);
     this.x = seedState(this.channelN, this.grid);
@@ -106,6 +111,16 @@ export class CaRunner implements CaEngine {
    * Replace the perception basis `[identity, dx, dy]` and re-upload it.
    * The ONNX graph takes the kernel as an input, so no session rebuild needed.
    */
+  /** Select which target a conditional model should grow (one-hot of length cond_n). */
+  setCond(index: number): void {
+    if (!this.condN) return;
+    const i = Math.max(0, Math.min(this.condN - 1, index | 0));
+    const data = new Float32Array(this.condN);
+    data[i] = 1;
+    this.condTensor = new ort.Tensor('float32', data, [1, this.condN, 1, 1]);
+    this.reset();
+  }
+
   setKernels(ident: number[], dx: number[], dy: number[]): void {
     this.kernels = [ident.slice(), dx.slice(), dy.slice()];
     this.weight = buildPerceptionWeight(this.channelN, this.kernels);
@@ -318,6 +333,7 @@ export class CaRunner implements CaEngine {
           fire_mask: this.maskTensor!,
           step_size: this.stepTensor!,
         };
+        if (this.condTensor) feeds['cond'] = this.condTensor;
         // Pre-allocated output: ORT writes straight into our other state buffer.
         await this.session.run(feeds, { x_next: outTensor! });
         this.cur ^= 1;
@@ -328,6 +344,7 @@ export class CaRunner implements CaEngine {
           fire_mask: new ort.Tensor('float32', this.mask, [1, 1, H, W]),
           step_size: new ort.Tensor('float32', new Float32Array([1]), []),
         };
+        if (this.condTensor) feeds['cond'] = this.condTensor;
         const out = await this.session.run(feeds);
         this.x = (out['x_next'] as ort.Tensor).data as Float32Array;
       }

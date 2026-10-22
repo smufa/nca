@@ -129,7 +129,10 @@ export class ShaderRunner implements CaEngine {
   static supports(model: ManifestModel): boolean {
     const C = model.meta.channel_n;
     const h = model.meta.weights.hidden_n;
-    return C >= 4 && C <= 16 && h > 0 && h % 4 === 0;
+    // Conditional models need the one-hot appended to `perc`, which the shader
+    // does not do yet - fall back to WASM for those.
+    const conditional = (model.meta.cond_n ?? 0) > 0;
+    return C >= 4 && C <= 16 && h > 0 && h % 4 === 0 && !conditional;
   }
 
   get mode(): string {

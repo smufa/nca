@@ -17,6 +17,8 @@ const viewsEl = el<HTMLDivElement>('views');
 const statusEl = el<HTMLSpanElement>('status');
 const perfEl = el<HTMLSpanElement>('perf');
 const modelSelect = el<HTMLSelectElement>('model');
+const targetField = el<HTMLLabelElement>('targetField');
+const condSelect = el<HTMLSelectElement>('condSelect');
 const engineSelect = el<HTMLSelectElement>('engine');
 const gridSizeSelect = el<HTMLSelectElement>('gridSize');
 const playBtn = el<HTMLButtonElement>('play');
@@ -322,6 +324,37 @@ function onKernelEdit(): void {
   if (runner) runner.setKernels(kernels[0], kernels[1], kernels[2]);
 }
 
+/** Render an emoji target spec as its glyph (falling back to the raw spec). */
+function prettySpec(spec: string): string {
+  if (!spec.startsWith('emoji:')) return spec;
+  const v = spec.slice('emoji:'.length);
+  if (!/^[0-9a-f-]+$/i.test(v)) return v;
+  try {
+    return v
+      .split('-')
+      .map((c) => String.fromCodePoint(parseInt(c, 16)))
+      .join('');
+  } catch {
+    return spec;
+  }
+}
+
+/** Populate the target picker for a conditional model, or hide it. */
+function setupCond(model: ManifestModel): void {
+  const n = model.meta.cond_n ?? 0;
+  condSelect.innerHTML = '';
+  targetField.style.display = n ? '' : 'none';
+  if (!n) return;
+  const specs = model.meta.targets ?? [];
+  for (let i = 0; i < n; i++) {
+    const opt = document.createElement('option');
+    opt.value = String(i);
+    opt.textContent = specs[i] ? prettySpec(specs[i]) : `target ${i + 1}`;
+    condSelect.appendChild(opt);
+  }
+  condSelect.value = '0';
+}
+
 function resetKernelsUI(): void {
   autoAngle = 0;
   angleInput.value = '0';
@@ -596,6 +629,7 @@ async function selectModel(model: ManifestModel): Promise<void> {
     console.error(e);
     return;
   }
+  setupCond(model);
   rebuildViews();
   resetKernelsUI();
   gridSizeSelect.value = String(runner.grid);
@@ -747,6 +781,14 @@ speedInput.addEventListener('input', () => {
 modelSelect.addEventListener('change', () => {
   const m = manifest?.models.find((x) => x.id === modelSelect.value);
   if (m) void selectModel(m);
+});
+
+condSelect.addEventListener('change', () => {
+  // setCond() resets the state, so don't do it mid-step.
+  void whenIdle().then(() => {
+    runner?.setCond?.(Number(condSelect.value) || 0);
+    drawAll();
+  });
 });
 
 engineSelect.value = ep;

@@ -32,6 +32,8 @@ export interface CaEngine {
   setKernels(ident: number[], dx: number[], dy: number[]): void;
   /** The perception kernels the engine is currently using. */
   getKernels(): number[][];
+  /** Conditional models: choose which target to grow (index into meta.targets). */
+  setCond?(index: number): void;
   dispose(): Promise<void>;
 
   /**

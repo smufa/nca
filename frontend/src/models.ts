@@ -8,6 +8,10 @@ export interface ModelMeta {
   fire_rate: number;
   learn_perception?: boolean;
   perception_kernel?: number[];
+  /** >0 for a conditional model: the one-hot selector width. */
+  cond_n?: number;
+  /** Target spec per selector index (conditional models). */
+  targets?: string[];
   num_parameters: number;
   grid: number;
   dynamic_shape: boolean;
