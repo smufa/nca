@@ -65,6 +65,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--hidden", type=int, default=128, help="update-rule hidden width")
     p.add_argument("--fire-rate", type=float, default=0.5)
     p.add_argument(
+        "--learn-perception",
+        action="store_true",
+        help="learn the Sobel dx/dy perception kernels (identity stays fixed)",
+    )
+    p.add_argument(
         "--no-wrap",
         action="store_true",
         help="use zero (non-periodic) boundaries instead of circular wrapping",
@@ -197,6 +202,7 @@ def main(argv: list[str] | None = None) -> None:
         fire_rate=args.fire_rate,
         hidden_n=args.hidden,
         wrap=not args.no_wrap,
+        learn_perception=args.learn_perception,
     )
 
     print(f"Target: {args.target}  ({args.target_size}px, padded to {h}x{w})")

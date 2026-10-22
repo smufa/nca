@@ -44,30 +44,40 @@ def get_living_mask(x: torch.Tensor, wrap: bool = True) -> torch.Tensor:
     return pooled > ALIVE_THRESHOLD
 
 
-def _perception_kernels(channel_n: int, angle: float = 0.0) -> torch.Tensor:
-    """Build the fixed depthwise Sobel perception kernel.
+def _canonical_kernels(angle: float = 0.0) -> torch.Tensor:
+    """The three 3x3 perception kernels, ``(identity, d/dx, d/dy)``, as ``[3,3,3]``.
 
-    Returns a ``[3 * channel_n, 1, 3, 3]`` weight for a depthwise convolution
-    with ``groups=channel_n``. For every input channel the three output
-    channels are ``[identity, d/dx, d/dy]``.
+    The Sobel filters are normalised by 8 as in the reference implementation.
+    ``angle`` rotates dx/dy, which is what the frontend's kernel lab exposes.
     """
     ident = torch.tensor([0.0, 1.0, 0.0])
     ident = torch.outer(ident, ident)
-
-    # Sobel filter, normalised by 8 as in the reference implementation.
     dx = torch.outer(
         torch.tensor([1.0, 2.0, 1.0]), torch.tensor([-1.0, 0.0, 1.0])
     ) / 8.0
     dy = dx.t()
 
     c, s = math.cos(angle), math.sin(angle)
-    # [3, 3, 3] -> last dim indexes (identity, dx, dy)
-    kernels = torch.stack([ident, c * dx - s * dy, s * dx + c * dy], dim=0)
+    return torch.stack([ident, c * dx - s * dy, s * dx + c * dy], dim=0)
 
-    weight = torch.zeros(3 * channel_n, 1, 3, 3)
-    for ci in range(channel_n):
-        weight[3 * ci : 3 * ci + 3, 0] = kernels
-    return weight
+
+def _kernels_to_weight(channel_n: int, kernels: torch.Tensor) -> torch.Tensor:
+    """Expand shared ``[3,3,3]`` kernels to a ``[3C, 1, 3, 3]`` depthwise weight.
+
+    Every channel gets the same ``(identity, d/dx, d/dy)`` triple, so this is just
+    a repeat: the frontend and the WGSL step likewise assume one shared kernel.
+    """
+    return kernels.repeat(channel_n, 1, 1).unsqueeze(1)
+
+
+def _perception_kernels(channel_n: int, angle: float = 0.0) -> torch.Tensor:
+    """The fixed (canonical) depthwise Sobel perception weight.
+
+    Returns a ``[3 * channel_n, 1, 3, 3]`` weight for a depthwise convolution
+    with ``groups=channel_n``. For every input channel the three output
+    channels are ``[identity, d/dx, d/dy]``.
+    """
+    return _kernels_to_weight(channel_n, _canonical_kernels(angle))
 
 
 class NeuralCA(nn.Module):
@@ -83,11 +93,13 @@ class NeuralCA(nn.Module):
         fire_rate: float = 0.5,
         hidden_n: int = 128,
         wrap: bool = True,
+        learn_perception: bool = False,
     ) -> None:
         super().__init__()
         self.channel_n = channel_n
         self.fire_rate = fire_rate
         self.wrap = wrap
+        self.learn_perception = learn_perception
 
         # Perception output has 3 * channel_n channels; the update rule is a
         # small MLP applied per-cell via 1x1 convolutions.
@@ -101,19 +113,44 @@ class NeuralCA(nn.Module):
         nn.init.zeros_(self.update[2].weight)
         nn.init.zeros_(self.update[2].bias)
 
-        self.register_buffer(
-            "_perception_weight",
-            _perception_kernels(channel_n),
-            persistent=False,
-        )
+        if learn_perception:
+            # Learning the perception means learning dx/dy; the identity kernel is
+            # kept fixed (it is what lets a cell see its own state). The kernels
+            # are shared across channels, matching the WGSL 27-float kernel buffer
+            # and the frontend's kernel lab.
+            canonical = _canonical_kernels()
+            self.register_buffer("_identity_kernel", canonical[0:1].clone(), persistent=False)
+            self.sobel = nn.Parameter(canonical[1:3].clone())  # [2,3,3] = (dx, dy)
+        else:
+            self.register_buffer(
+                "_perception_weight",
+                _perception_kernels(channel_n),
+                persistent=False,
+            )
 
     @property
     def num_parameters(self) -> int:
         return sum(p.numel() for p in self.parameters())
 
+    def kernels(self, angle: float = 0.0) -> torch.Tensor:
+        """The ``[3,3,3]`` ``(identity, d/dx, d/dy)`` kernels currently in use.
+
+        With ``learn_perception`` these are the trained parameters; ``angle`` only
+        applies to the fixed canonical kernels.
+        """
+        if self.learn_perception:
+            return torch.cat([self._identity_kernel, self.sobel], dim=0)
+        return _canonical_kernels(angle)
+
+    def perception_weight(self, angle: float = 0.0) -> torch.Tensor:
+        """The ``[3C, 1, 3, 3]`` depthwise perception weight currently in use."""
+        return _kernels_to_weight(self.channel_n, self.kernels(angle))
+
     def perceive(self, x: torch.Tensor, angle: float = 0.0) -> torch.Tensor:
         """Concatenate each cell's state with its x/y spatial gradients."""
-        if angle == 0.0:
+        if self.learn_perception:
+            weight = self.perception_weight()
+        elif angle == 0.0:
             weight = self._perception_weight
         else:
             weight = _perception_kernels(self.channel_n, angle).to(
