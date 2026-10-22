@@ -49,3 +49,43 @@ export async function loadManifest(url = '/models/manifest.json'): Promise<Manif
   }
   return (await res.json()) as Manifest;
 }
+
+/** A model's place in the picker: which group, and the short label to show. */
+export interface ModelGroup {
+  group: string;
+  label: string;
+  /** Sort key inside the group (models with equal order keep manifest order). */
+  order: number;
+}
+
+/** Groups are shown in this order; any other group name is appended after. */
+export const GROUP_ORDER = ['Emoji sweep', 'Crab · capacity', 'Crab · checkpoints', 'Demos'];
+
+/**
+ * Presentation grouping for the model picker, derived from the model id so no
+ * manifest bookkeeping is needed. Falls back to a single "Other" group.
+ */
+export function modelGroup(m: ManifestModel): ModelGroup {
+  const id = m.id;
+  // Capacity sweep: crab_c6_h128, crab_c16_h64
+  let mt = /^\w+_c(\d+)_h(\d+)$/.exec(id);
+  if (mt) {
+    const c = Number(mt[1]);
+    const h = Number(mt[2]);
+    return { group: 'Crab · capacity', label: `C=${c} h=${h}`, order: c * 10000 + h };
+  }
+  // Training checkpoints: crab_regen_2000, crab_regen_8000_static
+  mt = /^\w+_regen_(\d+)(_static)?$/.exec(id);
+  if (mt) {
+    return {
+      group: 'Crab · checkpoints',
+      label: `@${mt[1]}${mt[2] ? ' static' : ''}`,
+      order: Number(mt[1]),
+    };
+  }
+  if (id === 'smile-demo') return { group: 'Demos', label: 'smile', order: 0 };
+  // Regime sweep: cactus_growing, crab_regenerating, ...
+  mt = /^(\w+)_(growing|persistent|regenerating)$/.exec(id);
+  if (mt) return { group: 'Emoji sweep', label: `${mt[1]} · ${mt[2]}`, order: 0 };
+  return { group: 'Other', label: id, order: 0 };
+}

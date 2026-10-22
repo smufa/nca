@@ -1,5 +1,5 @@
 import './style.css';
-import { loadManifest } from './models';
+import { GROUP_ORDER, loadManifest, modelGroup } from './models';
 import type { Manifest, ManifestModel } from './models';
 import { CaRunner } from './runner';
 import { ShaderRunner } from './shader';
@@ -617,11 +617,24 @@ async function loadModels(): Promise<void> {
     return;
   }
   modelSelect.innerHTML = '';
-  for (const m of manifest.models) {
-    const opt = document.createElement('option');
-    opt.value = m.id;
-    opt.textContent = `${m.id} (${m.meta.experiment})`;
-    modelSelect.appendChild(opt);
+  const entries = manifest.models.map((m, i) => ({ m, g: modelGroup(m), i }));
+  const names = [...GROUP_ORDER];
+  for (const e of entries) if (!names.includes(e.g.group)) names.push(e.g.group);
+  for (const name of names) {
+    const items = entries
+      .filter((e) => e.g.group === name)
+      .sort((a, b) => a.g.order - b.g.order || a.i - b.i);
+    if (items.length === 0) continue;
+    const og = document.createElement('optgroup');
+    og.label = name;
+    for (const { m, g } of items) {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = g.label;
+      opt.title = `${m.id} · ${m.meta.experiment} · C=${m.meta.channel_n} h=${m.meta.hidden_n}`;
+      og.appendChild(opt);
+    }
+    modelSelect.appendChild(og);
   }
   const first = manifest.models[0];
   if (first) {

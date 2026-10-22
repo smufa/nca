@@ -49,7 +49,7 @@ frontend/src/
   wgsl/*.wgsl       the actual shaders (shared with the Python bench)
   nca.ts            pure helpers: perception kernels, seed, channel mapping
   main.ts           UI: views, brush, kernel lab, engine/grid switches
-  models.ts         manifest + meta types
+  models.ts         manifest + meta types + picker grouping (modelGroup)
 
 scripts/shader_bench.py   headless GPU correctness/benchmark harness (wgpu-py)
 scripts/variants/*.wgsl   shader experiments (see "Shader performance")
