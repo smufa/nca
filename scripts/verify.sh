@@ -31,7 +31,7 @@ if bash scripts/bench.sh crab_regenerating --steps 100 --reference; then
 else
     status=$?
     if [[ $status -eq 3 ]]; then
-        echo "SKIPPED: no wgpu (see scripts/bench.sh; run this step where uv is available)"
+        echo "SKIPPED: no usable GPU here (bench.sh exit 3: wgpu missing or no Vulkan adapter)"
     else
         exit "$status"
     fi
