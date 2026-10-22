@@ -30,6 +30,9 @@ class TrainConfig:
     damage_n: int = 3
     noise_n: int = 0
     noise_std: float = 0.0
+    # Fraction of the batch whose *conditioning* is reassigned to a different
+    # target while keeping its state, i.e. "turn this emoji into another one".
+    mismatch_p: float = 0.0
     train_steps_min: int = 64
     train_steps_max: int = 96
     lr: float = 2e-3
@@ -257,7 +260,7 @@ def train(
     print(
         f"Training on {device} | grid {h}x{w} | {ca.num_parameters} params | "
         f"pool={cfg.use_pool} damage={damage_n} noise={noise_n}x{cfg.noise_std} "
-        f"targets={n_targets} "
+        f"targets={n_targets} mismatch={cfg.mismatch_p} "
         f"| {cfg.iterations} iters"
     )
 
@@ -291,6 +294,24 @@ def train(
                 sel = step % cond_n
                 cond[0] = F.one_hot(torch.tensor(sel, device=device), cond_n).float()
                 tgt[0] = target[sel]
+            if cond is not None and cfg.mismatch_p > 0:
+                # Break the state/cond pairing for a slice of the batch (never the
+                # seed slot): an already-grown emoji is asked to become a
+                # *different* one. Without this every example is self-consistent,
+                # so a small MLP could satisfy the task by memorising N attractors
+                # and treating the one-hot as an index. Cross-target pairs force the
+                # conditioning to actually steer the dynamics - and a model that can
+                # convert cannot have collapsed its condition.
+                k = min(int(round(cfg.mismatch_p * cfg.batch_size)), cfg.batch_size - 1)
+                if k > 0:
+                    # indices 1..batch-1, so the fresh seed at 0 is untouched
+                    cand = (torch.randperm(cfg.batch_size - 1, generator=generator)[:k] + 1).to(device)
+                    cur = cond[cand].argmax(dim=1).cpu()
+                    # any target other than the current one
+                    delta = torch.randint(0, cond_n - 1, (k,), generator=generator)
+                    newt = ((cur + 1 + delta) % cond_n).to(device)
+                    cond[cand] = F.one_hot(newt, cond_n).float()
+                    tgt[cand] = target[newt]
             if damage_n:
                 dmg = make_circle_masks(damage_n, h, w, generator).to(device)
                 x0[-damage_n:] *= (1.0 - dmg).unsqueeze(1)

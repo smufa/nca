@@ -76,6 +76,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="std of the additive state noise (0 = off; try 0.1-0.3)",
     )
+    p.add_argument(
+        "--mismatch-p",
+        type=float,
+        default=0.0,
+        help="fraction of each batch asked to convert a grown target into a "
+        "different one (only meaningful with --targets; try 0.2-0.4)",
+    )
     p.add_argument("--pool-size", type=int, default=1024)
     p.add_argument(
         "--batch-size",
@@ -206,6 +213,7 @@ def main(argv: list[str] | None = None) -> None:
         damage_n=damage_n,
         noise_n=noise_n,
         noise_std=noise_std,
+        mismatch_p=args.mismatch_p,
         train_steps_min=args.train_steps[0],
         train_steps_max=args.train_steps[1],
         lr=args.lr,
