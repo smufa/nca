@@ -45,7 +45,7 @@ Output
 Graph: depthwise conv (`groups=C`, the kernels above) → `3C→hidden` → ReLU →
 (optional hidden→hidden) → `hidden→C` → `x + dx*fire_mask*step_size` → living-cell
 masking (`MaxPool` → `Greater` → `And` → `Mul`), all inside one
-`Pad(mode="wrap")`. The exact layer stack is `ModelSpec.depth`; the weight order is
+`Pad(mode="wrap")`. The exact layer stack is `ModelSpec.hidden_layers`; the weight order is
 `ModelSpec.weight_offsets()` (which `weights.bin` and the shader both follow).
 
 The UI edits three 3×3 matrices; JS expands them with `w[3*ci+cm] = kernel[cm]` so the

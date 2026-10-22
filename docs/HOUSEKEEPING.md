@@ -166,13 +166,19 @@ the committed parity values on a no-op run.
 
 Landed: `nca/spec.py`, `spec.json`/`train.json` from `train.py`, `export.py`
 rewired (`--all`, `--reindex`, spec-derived `meta.json`), `sample.py` rewritten
-(`--run`, `--cond`), `tests/` (283 tests, ~6 s, no GPU).
+(`--run`, `--cond`), `tests/` (329 tests, ~5 s, no GPU).
 
 Verification that it is a true no-op: all 45 committed `meta.json` files are
-byte-identical to what the new `export.py` produces, `build_parser()` exposes
-exactly the same flags, and `_save_weights` reproduces every committed
-`weights.bin` **byte for byte** (this is now `tests/test_export.py`, so it stays
-proven).
+byte-identical to what the new `export.py` produces, `_save_weights` reproduces
+every committed `weights.bin` **byte for byte** (this is now
+`tests/test_export.py`, but it needs the source checkpoint -- which is gitignored --
+so it skips in a clean clone), and `nca.export --reindex` reproduces the committed
+`manifest.json`.
+
+Flag parity is *not* one-to-one: `nca/cli.py` dropped `--compile` (it measured
+neutral-to-slower, see `docs/findings/training-perf.md`) and `nca/export.py` gained
+`--all/--only/--reindex/--target-size/--padding`. The sets are meant to differ:
+training flags configure a run, export flags configure a re-export.
 
 Three bugs/pitfalls found on the way — all fixed or noted:
 
@@ -184,9 +190,10 @@ Three bugs/pitfalls found on the way — all fixed or noted:
 2. **`export_batch`/variants metas keep only `experiment`**, not the full
    provenance, and 24 of the 45 checkpoints live in `/tmp` (`sweep_runs/*`,
    `crab_regen/*`) — `--all` skips those by design, but they should be moved into
-   the repo (or `runs/`) before `/tmp` is wiped. `meta.json` now also carries
-   `source_run` + full `spec_id`, so a future export is reproducible from the
-   run dir alone.
+   the repo (or `runs/`) before `/tmp` is wiped. `meta.json` records
+   `source_checkpoint`, and the run directory beside it is self-describing
+   (`spec.json` + `train.json`), so a re-export is reproducible from the run dir
+   alone -- as long as the run dir survives.
 3. **Resuming does not restore the sample pool unless `--save-pool` was used**
    (`nca/train.py:130-136`: the pool is ~340 MB at the paper size, so keeping it
    is opt-in and resume prints "no pool in resume state; restarting the pool").

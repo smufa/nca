@@ -32,16 +32,19 @@ The whole point of the architecture is that **one trained model = a single
 - **Training and inference must agree.** Any change to `nca/model.py` changes the
   graph; re-export and check the parity line (`--no-verify` skips it).
 - **Read a model's shape from `nca/spec.py`, never re-derive it.** `ModelSpec` is
-  the one source of truth for `C` / hidden / depth / `cond_n` / boundaries: the
+  the one source of truth for `C` / hidden / hidden_layers / `cond_n` / boundaries: the
   module, `export.py`, the `weights.bin` offsets and the frontend's `meta.json` all
   agree with it, and `tests/test_spec.py` + `scripts/check_meta.py` prove it for
-  every committed export. `update[0]`'s fan-in is `3C + cond_n`; deriving `C` from
+  every committed export (`tests/test_export.py` repacks each committed
+  `model.onnx` into `weights.bin` and diffs it, so the blob layout is proven
+  without the `runs/` checkout; the checkpoint-based checks skip in a clean clone).
+  `update[0]`'s fan-in is `3C + cond_n`; deriving `C` from
   it is wrong (that bug lived in `nca/sample.py`).
 
 ## Repo layout
 
 ```
-nca/spec.py         ModelSpec: the shape of a model (channels, hidden, depth, cond_n)
+nca/spec.py         ModelSpec: the shape of a model (channels, hidden, hidden_layers, cond_n)
 nca/model.py        NeuralCA (perception, update rule, fire + living masks)
 nca/train.py        training loop (sample pool, damage + noise, grad normalisation, resume)
 nca/targets.py      target images: emoji / image file / procedural shapes
@@ -97,9 +100,9 @@ uv run python -m nca.export --checkpoint runs/.../ckpt_final.pt \
     --id NAME --experiment regenerating --target "emoji:1f980"   # verifies parity
 uv run python -m nca.export --all            # re-export every model that has its checkpoint
 uv run python -m nca.export --reindex        # rebuild manifest.json from exports/*/meta.json
-uv run python -m nca.sample --run runs/NAME --steps 300         # shape comes from spec.json
+uv run python -m nca.sample --run runs/NAME --steps 300         # shape from spec.json, else the checkpoint
 uv run python -m nca.sample --run runs/cross8 --cond 3          # conditional model, target 3
-uv run python -m pytest -q tests              # 330 tests, ~13 s on CPU
+uv run python -m pytest -q tests              # 329 tests, ~5 s on CPU
 uv run python -m scripts.check_meta           # exports/*/meta.json vs nca/spec.py
 
 cd frontend && npm install && npm run dev     # http://localhost:5173
