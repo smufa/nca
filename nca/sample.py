@@ -71,7 +71,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--fire-rate",
         type=float,
         default=None,
-        help="override the fire rate (default: the model's own)",
+        help="override the fire rate (default: the run's recorded value, else 0.5 -- "
+        "a state dict alone does not know it)",
     )
     p.add_argument(
         "--no-wrap",
@@ -92,10 +93,17 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     if args.run:
-        spec = ModelSpec.from_run_dir(args.run)
+        try:
+            spec = ModelSpec.from_run_dir(args.run)
+        except (FileNotFoundError, ValueError) as exc:
+            parser.error(str(exc))
+            return  # unreachable, keeps type checkers happy
         checkpoint = Path(args.checkpoint) if args.checkpoint else find_checkpoint(Path(args.run))
     elif args.checkpoint:
         checkpoint = Path(args.checkpoint)
+        if not checkpoint.exists():
+            parser.error(f"no such checkpoint: {checkpoint}")
+            return  # unreachable
         spec = ModelSpec.from_checkpoint(checkpoint)
     else:
         parser.error("one of --checkpoint or --run is required")

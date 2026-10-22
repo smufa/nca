@@ -77,6 +77,13 @@ class ModelSpec:
             )
         if self.hidden_n <= 0:
             raise ValueError(f"hidden_n must be positive, got {self.hidden_n}")
+        if self.hidden_n % 4:
+            # The shader loads the MLP in vec4 rows (`HG = hidden/4`) and the
+            # exporter pads W1 rows to a multiple of 4; a hidden width that is
+            # not a multiple of 4 would silently drop the tail units on the GPU.
+            raise ValueError(
+                f"hidden_n must be a multiple of 4 (the WGSL step reads vec4 rows), got {self.hidden_n}"
+            )
         if self.hidden_layers < 1:
             raise ValueError(f"hidden_layers must be >= 1, got {self.hidden_layers}")
         if self.cond_n < 0:
@@ -264,15 +271,61 @@ class ModelSpec:
         path = Path(path)
         spec_file = path / "spec.json"
         if spec_file.exists():
-            return cls.from_json(json.loads(spec_file.read_text()))
+            spec = cls.from_json(json.loads(spec_file.read_text()))
+            cls._check_against_checkpoint(spec, find_checkpoint(path))
+            return spec
         checkpoint = find_checkpoint(path)
         if checkpoint is None:
             raise FileNotFoundError(f"no spec.json or checkpoint in {path}")
         return cls.from_checkpoint(checkpoint)
 
     @classmethod
+    def _check_against_checkpoint(cls, spec: "ModelSpec", checkpoint: Path | None) -> None:
+        """Refuse a ``spec.json`` that disagrees with the weights next to it.
+
+        ``train.py`` writes ``spec.json`` before training resumes, so an aborted
+        resume could leave a spec that describes a different module than the
+        checkpoints in the same directory. Reading the shape from the checkpoint is
+        the only way to notice, and a wrong spec is worse than no spec: every
+        consumer (sample, export, the shader override constants) trusts it.
+        """
+        if checkpoint is None:
+            return
+        actual = cls.from_state_dict(load_model_state(checkpoint))
+        for field in ("channel_n", "hidden_n", "hidden_layers", "cond_n", "learn_perception"):
+            want, got = getattr(actual, field), getattr(spec, field)
+            if want != got:
+                raise ValueError(
+                    f"{checkpoint.parent}/spec.json says {field}={got!r} but "
+                    f"{checkpoint.name} has {field}={want!r}; the run directory is "
+                    f"inconsistent (an aborted resume?). Re-derive the spec with "
+                    f"ModelSpec.from_checkpoint()."
+                )
+
+    @classmethod
     def from_checkpoint(cls, checkpoint: str | Path, *, wrap: bool = True) -> "ModelSpec":
-        return cls.from_state_dict(load_model_state(checkpoint), wrap=wrap)
+        """Spec of a ``.pt`` checkpoint, with non-tensor fields from its metadata.
+
+        A state dict carries no ``fire_rate``/``wrap``, so those come from a sibling
+        ``spec.json``/``meta.json`` when there is one (otherwise the dataclass
+        defaults, which is what older checkpoints were trained with).
+        """
+        checkpoint = Path(checkpoint)
+        spec = cls.from_state_dict(load_model_state(checkpoint), wrap=wrap)
+        for name in ("spec.json", "meta.json"):
+            side = checkpoint.parent / name
+            if not side.exists():
+                continue
+            try:
+                data = json.loads(side.read_text())
+            except json.JSONDecodeError:
+                continue
+            if "fire_rate" in data:
+                spec = replace(spec, fire_rate=float(data["fire_rate"]))
+            if wrap and "wrap" in data:
+                spec = replace(spec, wrap=bool(data["wrap"]))
+            break
+        return spec
 
     # --- serialisation -----------------------------------------------------
 
@@ -318,11 +371,20 @@ def load_model_state(checkpoint: str | Path) -> Mapping[str, Any]:
 def find_checkpoint(run_dir: str | Path) -> Path | None:
     """The checkpoint worth exporting from a run directory.
 
-    ``ckpt_final.pt`` wins; otherwise the highest-numbered ``ckpt_NNNNNN.pt``.
+    ``ckpt_final.pt`` wins; otherwise the highest-numbered ``ckpt_NNNNNN.pt``
+    (compared numerically -- ``sorted()`` on the names is lexicographic and picks
+    the wrong one past six digits).
     """
     run_dir = Path(run_dir)
     final = run_dir / "ckpt_final.pt"
     if final.exists():
         return final
-    numbered = sorted(run_dir.glob("ckpt_*.pt"))
-    return numbered[-1] if numbered else None
+    numbered = list(run_dir.glob("ckpt_*.pt"))
+    if not numbered:
+        return None
+
+    def step(path: Path) -> int:
+        digits = "".join(ch for ch in path.stem if ch.isdigit())
+        return int(digits) if digits else -1
+
+    return max(numbered, key=step)

@@ -160,6 +160,23 @@ def train(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # A resume has to be validated *before* the run directory is rewritten: if the
+    # checkpoint does not fit the module we just built, `load_state_dict` raises,
+    # and a spec.json written earlier would then describe a model that no
+    # checkpoint in the directory matches (`ModelSpec.from_run_dir` refuses that,
+    # but not writing the lie in the first place is better).
+    resume_state: dict | None = None
+    if resume is not None:
+        resume_state = torch.load(resume, map_location="cpu")
+        if "model" not in resume_state:
+            # `ckpt_*.pt` is a bare state dict; only `state.pt` carries the optimizer
+            # and RNG, which is what resuming needs.
+            raise ValueError(
+                f"{resume} is a bare checkpoint (no optimizer/RNG state); "
+                f"--resume needs the run's state.pt"
+            )
+        ca.load_state_dict(resume_state["model"])
+
     # Record what this run *is* before any training happens, so a crashed or
     # still-running job is already loadable by `nca.sample --run <dir>` and
     # re-exportable without the caller remembering the flags.
@@ -199,7 +216,7 @@ def train(
     # latency-bound: time is linear in batch size, so there is nothing to fuse
     # away. `torch.compile` measured neutral-to-slower here (compiling the whole
     # sequence pays a warmup and is specialised per unroll length) - see
-    # docs/findings/training-perf.md. `scripts/profile_train.py --compile`
+    # docs/findings/training-perf.md. `scripts/profile_train.py --cuda-graphs`
     # re-measures it if the assumption ever needs revisiting.
     def forward(
         x: torch.Tensor, masks: torch.Tensor, cond: torch.Tensor | None
@@ -247,9 +264,8 @@ def train(
 
     losses: list[float] = []
     start_step = 0
-    if resume is not None:
-        state = torch.load(resume, map_location="cpu")
-        ca.load_state_dict(state["model"])
+    if resume_state is not None:
+        state = resume_state
         optimizer.load_state_dict(state["optimizer"])
         scheduler.load_state_dict(state["scheduler"])
         start_step = int(state.get("step", 0))
