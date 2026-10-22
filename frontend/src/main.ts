@@ -73,17 +73,17 @@ let selectToken = 0;
 let accumulator = 0;
 let lastT = performance.now();
 
-type Ep = 'webgpu' | 'wasm' | 'shader';
+type Ep = 'wasm' | 'shader';
 
-/** Engine from ?ep= (persisted) or localStorage; default WASM (faster on many GPUs). */
+/** Engine from ?ep= (persisted) or localStorage; default WASM (works everywhere). */
 function initialEp(): Ep {
   const url = new URLSearchParams(location.search).get('ep');
-  if (url === 'webgpu' || url === 'wasm' || url === 'shader') {
+  if (url === 'wasm' || url === 'shader') {
     localStorage.setItem('nca.ep', url);
     return url;
   }
   const stored = localStorage.getItem('nca.ep');
-  return stored === 'webgpu' || stored === 'shader' ? stored : 'wasm';
+  return stored === 'shader' ? 'shader' : 'wasm';
 }
 
 let ep: Ep = initialEp();
@@ -620,10 +620,10 @@ async function selectModel(model: ManifestModel): Promise<void> {
     const shaderOk = ep !== 'shader' || ShaderRunner.supports(model);
     shaderFallback = !shaderOk;
     runner = !shaderOk
-      ? await CaRunner.create(model, 'wasm')
+      ? await CaRunner.create(model)
       : ep === 'shader'
         ? await ShaderRunner.create(model)
-        : await CaRunner.create(model, ep);
+        : await CaRunner.create(model);
   } catch (e) {
     setStatus(`failed to load: ${(e as Error).message}`, 'err');
     console.error(e);

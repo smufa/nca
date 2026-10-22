@@ -91,13 +91,12 @@ npm install
 npm run dev      # http://localhost:5173
 ```
 
-It reads `exports/manifest.json` and offers three inference engines:
+It reads `exports/manifest.json` and offers two inference engines:
 
 | engine | runtime | notes |
 | --- | --- | --- |
-| `WASM (CPU)` | `onnxruntime-web` WASM | default; fastest on weak GPUs |
-| `WebGPU (ORT)` | `onnxruntime-web` WebGPU EP | ~1–12 ms per graph node |
-| `WebGPU (shader)` | native WGSL | 2 compute passes, zero-copy render |
+| `WebGPU (shader)` | native WGSL | **the performance path**; 2 compute passes, zero-copy render |
+| `WASM (CPU)` | `onnxruntime-web` WASM | compatibility fallback for models the shader cannot represent |
 
 Controls: model / engine / grid pickers, play-pause (<kbd>space</kbd>), step
 (<kbd>s</kbd>), reset (<kbd>r</kbd>), speed, canvas size, add channel view
@@ -113,7 +112,7 @@ Controls: model / engine / grid pickers, play-pause (<kbd>space</kbd>), step
 - **Grid** — 48…256; the model has dynamic `H`/`W` and periodic boundaries, so it
   runs on a larger torus without re-exporting.
 
-URL params: `?ep=wasm|webgpu|shader`, `?log=1` (ORT logs).
+URL params: `?ep=wasm|shader`, `?log=1` (ORT logs).
 
 Models are served from `../exports` at `/models` by a small Vite plugin (Vite
 ignores a `publicDir` outside the project root), so run

@@ -44,7 +44,7 @@ nca/viz.py          rendering, tiling, gifs, loss plots
 
 frontend/src/
   engine.ts         CaEngine interface shared by the two web backends
-  runner.ts         CaRunner: onnxruntime-web backend (wasm or webgpu EP)
+  runner.ts         CaRunner: onnxruntime-web WASM backend (CPU compatibility path)
   shader.ts         ShaderRunner: native WGSL backend (2 compute passes)
   wgsl/*.wgsl       the actual shaders (shared with the Python bench)
   nca.ts            pure helpers: perception kernels, seed, channel mapping
@@ -90,21 +90,25 @@ bash scripts/verify.sh                        # compile + build + parity, one sh
 bash scripts/bench.sh crab_regenerating --reference   # headless GPU correctness/perf
 ```
 
-Frontend URL params: `?ep=wasm|webgpu|shader`, `?log=1` (ORT logs).
+Frontend URL params: `?ep=wasm|shader`, `?log=1` (ORT logs).
 Engine choice persists in `localStorage` (`nca.ep`).
 
 ## Frontend engines (Engine dropdown)
 
 | engine | runtime | notes |
 |---|---|---|
-| `wasm` | onnxruntime-web WASM | **default**; fastest on weak GPUs (~120 steps/s @72²) |
-| `webgpu` | onnxruntime-web WebGPU EP | ~1–12 ms **per graph node** — slow on iGPUs |
-| `shader` | native WGSL | 2 dispatches; zero-copy render + GPU brush |
+| `wasm` | onnxruntime-web WASM | **compatibility fallback**; runs anything the shader cannot |
+| `shader` | native WGSL | **the performance path**; 2 dispatches, zero-copy render + GPU brush |
 
-`shader` is the performance path. It renders each view straight from the GPU
+The ORT **WebGPU EP was removed**: each ONNX node is its own dispatch (~1-12 ms
+per node on an iGPU), so it lost to both WASM and the shader. Dropping it also
+moved the import to `onnxruntime-web/wasm`, which halved the bundled wasm
+(26.8 -> 14.2 MB) and cut the JS by ~30%.
+
+`shader` renders each view straight from the GPU
 state buffer (`renderTo`) and applies brush strokes with a compute shader
-(`brush`), so nothing is downloaded per frame. `wasm`/`webgpu` render through
-Canvas2D and call `sync()` to refresh the CPU mirror `x`.
+(`brush`), so nothing is downloaded per frame. `wasm` renders through
+Canvas2D and calls `sync()` to refresh the CPU mirror `x`.
 
 ## Shader performance (important)
 
@@ -228,10 +232,10 @@ playing with the kernel lab, not by a metric.
   exporter passes `external_data=False` so the `.onnx` is self-contained.
 - **`torch.onnx.export(dynamic_shapes=...)`** takes **positional / forward arg
   names**, not ONNX input names.
-- **`ort.env.webgpu.device` is a promise.**
-- The WebGPU EP provider options (`validationMode`, buffer cache modes) were
-  tried and **removed** — they abort with `InternalError: out of memory` in the
-  current ORT-Web build. Don't reintroduce them.
+- The ORT **WebGPU EP is gone** (see the engine table above) - each ONNX node is
+  its own dispatch, so it lost to both WASM and the shader. Don't reintroduce its
+  provider options (`validationMode`, buffer cache modes) either - they abort with
+  `InternalError: out of memory` in the current ORT-Web build.
 - `frontend`'s Vite `publicDir` is `../exports`, which Vite ignores for a dir
   outside the root; a small plugin in `vite.config.ts` serves `/models` instead.
 - The brush edits via `CaEngine.brush` (shader) or `edit` (ORT), which queues
