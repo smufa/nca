@@ -299,19 +299,41 @@ def derive_spec(model_dir: Path, meta: dict[str, Any]) -> tuple[ModelSpec | None
         return None, "no ca.update.*.weight initializers"
     layers.sort()
     hidden_n = layers[0][1][0]
-    hidden_layers = len(layers)
+    # `ca.update.{0,2,4,...}.weight` = W1, then one block per extra hidden layer,
+    # then W_out: N initializers are N-1 hidden layers, NOT N (a 1-layer model has
+    # two of them, so `len(layers)` inflated every spec and made the blob check
+    # reject every export -- the L=1 models read as L=2, 6x too many weights).
+    hidden_layers = len(layers) - 1
     perception_n = layers[0][1][1]
     if perception_n != 3 * channel_n + cond_n:
         return None, f"update[0] fan-in {perception_n} != 3C+cond_n ({3 * channel_n + cond_n})"
-    if [idx for idx, _ in layers] != [2 * i for i in range(hidden_layers)]:
+    if [idx for idx, _ in layers] != [2 * i for i in range(hidden_layers + 1)]:
         return None, f"unexpected update layer indices {[i for i, _ in layers]}"
 
-    wrap = True
-    for node in graph.node:
-        if node.op_type == "Pad":
-            for attr in node.attribute:
-                if attr.name == "mode" and attr.s == b"constant":
-                    wrap = False
+    # Boundary handling, from the graph: a `Pad(mode=constant)` or a Conv with
+    # non-zero `pads` means zero padding (`wrap=False`). A graph with neither (e.g.
+    # the learned depthwise perception, whose Conv carries the padding) says nothing
+    # either way, so the recorded value wins rather than a guess.
+    pad_modes = [
+        attr.s
+        for node in graph.node
+        if node.op_type == "Pad"
+        for attr in node.attribute
+        if attr.name == "mode"
+    ]
+    conv_pads = [
+        list(attr.ints)
+        for node in graph.node
+        if node.op_type == "Conv"
+        for attr in node.attribute
+        if attr.name == "pads"
+    ]
+    if pad_modes:
+        wrap = not any(mode == b"constant" for mode in pad_modes)
+    elif any(any(p) for p in conv_pads):
+        wrap = False
+    else:
+        wrap = bool(meta.get("wrap", True))
 
     try:
         spec = ModelSpec(
@@ -418,6 +440,10 @@ def check_exports(
                 fixed = meta
             else:
                 fixed = fix_meta(meta, derived, _run_layout(meta))
+            onnx_path = model_dir / "model.onnx"
+            if onnx_path.is_file() and fixed.get("size_bytes") != onnx_path.stat().st_size:
+                # A derived field like any other: the file *is* the evidence.
+                fixed = {**fixed, "size_bytes": onnx_path.stat().st_size}
             if fixed != meta:
                 (model_dir / "meta.json").write_text(json.dumps(fixed, indent=2) + "\n")
                 meta = fixed

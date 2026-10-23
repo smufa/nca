@@ -1,0 +1,36 @@
+# Two one-off ablations on the regenerating crab, kept as data because they are
+# the two knobs most likely to be revisited.
+#
+#   perc  -- learn the Sobel dx/dy kernels instead of fixing them (identity stays)
+#   noise -- the `noisy` regime: rebuild the target from a corrupted state
+
+[sweep]
+name = "experiments"
+group = "experiments"
+
+[resources]
+partition = "mig-priority"
+constraint = "mig"
+gres = "gpu:1g.10gb:1"
+time = "02:00:00"
+mem = "16G"
+cpus = 4
+
+[defaults]
+target = "emoji:1f980"
+regime = "regenerating"
+target_size = 40
+padding = 16
+batch_size = 16
+iterations = 8000
+unroll = [64, 96]
+log_every = 25
+ckpt_every = 500
+
+[[run]]
+name = "crab.regenerating.perc"
+learn_perception = true
+
+[[run]]
+name = "crab.regenerating.noise"
+regime = "noisy"

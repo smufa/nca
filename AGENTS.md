@@ -46,6 +46,8 @@ The whole point of the architecture is that **one trained model = a single
 ```
 nca/spec.py         ModelSpec: the shape of a model (channels, hidden, hidden_layers, cond_n)
 nca/model.py        NeuralCA (perception, update rule, fire + living masks)
+nca/experiments.py  Experiment + REGIMES: every training default, in one place
+nca/sweep.py        `python -m nca.sweep <toml>`: render one sbatch call per run
 nca/train.py        training loop (sample pool, damage + noise, grad normalisation, resume)
 nca/targets.py      target images: emoji / image file / procedural shapes
 nca/export.py       export a checkpoint to ONNX + parity check + weights.bin
@@ -65,8 +67,10 @@ frontend/src/
 scripts/shader_bench.py   headless GPU correctness/benchmark harness (wgpu-py)
 scripts/check_meta.py     validate exports/*/meta.json against ModelSpec (--fix repairs)
 scripts/variants/*.wgsl   shader experiments (see docs/findings/shader-perf.md)
-tests/                    pytest: spec/weights layout, exporter, meta schema, training smoke
-slurm/                    cluster submission
+tests/                    pytest: spec/weights layout, exporter, meta schema, experiments, training smoke
+slurm/train.sbatch        one job (sources .venv, unsets PYTHONPATH, pins --constraint=h100)
+slurm/submit_sweep.sh     submit a sweep file: `bash slurm/submit_sweep.sh slurm/sweeps/<x>.toml`
+slurm/sweeps/*.toml       the studies: emoji-sweep, capacity, multi, cross, experiments, demo
 exports/                  exported models, committed (small); served to the UI
 assets/targets/           cached emoji PNGs (offline training)
 ```
@@ -96,13 +100,18 @@ paper size `W1[128,48]`, `b1[128]`, `W2[16,128]`, `b2[16]`.
 uv sync --group dev                     # Python env (CPU torch)
 uv run python main.py --target shape:heart --iterations 300        # train
 uv run python main.py --run-name demo --target emoji:1f980 --iterations 4000
+uv run python main.py --config slurm/sweeps/demo.toml --device cpu # a study's run, locally
+uv run python main.py --config slurm/sweeps/capacity.toml \
+    --run crab.regenerating.c=8.h=128 --set lr=1e-3                # file < flags < --set
 uv run python -m nca.export --checkpoint runs/.../ckpt_final.pt \
-    --id NAME --experiment regenerating --target "emoji:1f980"   # verifies parity
+    --id NAME --target "emoji:1f980"                             # verifies parity
 uv run python -m nca.export --all            # re-export every model that has its checkpoint
 uv run python -m nca.export --reindex        # rebuild manifest.json from exports/*/meta.json
+uv run python -m nca.export --reindex --refresh-targets  # also re-render target.png/npy
 uv run python -m nca.sample --run runs/NAME --steps 300         # shape from spec.json, else the checkpoint
-uv run python -m nca.sample --run runs/cross8 --cond 3          # conditional model, target 3
-uv run python -m pytest -q tests              # 329 tests, ~5 s on CPU
+uv run python -m nca.sample --run runs/cross8.mismatch --cond 3 # conditional model, target 3
+uv run python -m nca.sweep slurm/sweeps/cross.toml --dry-run    # what would sbatch
+uv run python -m pytest -q tests              # 412 tests, ~5 s on CPU
 uv run python -m scripts.check_meta           # exports/*/meta.json vs nca/spec.py
 
 cd frontend && npm install && npm run dev     # http://localhost:5173
@@ -110,6 +119,8 @@ npm run build                                 # tsc + vite build
 
 bash scripts/verify.sh                        # compile + tests + meta + build + parity
 bash scripts/bench.sh crab.regenerating --reference   # headless GPU correctness/perf
+
+bash slurm/submit_sweep.sh slurm/sweeps/emoji-sweep.toml   # cluster: 18 jobs
 ```
 
 ## Frontend engines

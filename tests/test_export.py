@@ -168,3 +168,75 @@ def test_export_all_skips_models_without_a_checkpoint(tmp_path, capsys):
     assert "gone" in out
     # The manifest is still rebuilt, so the UI keeps listing what exists on disk.
     assert (exports / "manifest.json").exists()
+
+
+# --- export determinism ------------------------------------------------------
+
+
+def test_committed_graphs_carry_no_exporter_metadata():
+    """`export --all` + `git diff` is the exporter-drift guard, so the graphs must
+    be free of the metadata that changes without the graph changing: the stack
+    trace embeds `nca/export.py` line numbers (and the author's home path) and
+    `range_constraints` names symbolic dims that differ between torch versions."""
+    onnx = pytest.importorskip("onnx")
+    noisy = []
+    for model_id, _ in META:
+        model = onnx.load(str(EXPORTS / model_id / "model.onnx"))
+        if model.metadata_props or model.graph.metadata_props:
+            noisy.append(model_id)
+        if any(node.metadata_props for node in model.graph.node):
+            noisy.append(model_id)
+    assert not noisy, f"run `python -m nca.export --strip-metadata` for: {sorted(set(noisy))}"
+
+
+def test_strip_export_metadata_is_idempotent(tmp_path):
+    onnx = pytest.importorskip("onnx")
+    src = EXPORTS / next(iter(META_IDS)) / "model.onnx"
+    import shutil
+
+    from nca.export import strip_export_metadata
+
+    target = tmp_path / "model.onnx"
+    shutil.copy(src, target)
+    assert strip_export_metadata(target) == 0  # committed graphs are already clean
+    model = onnx.load(str(target))
+    model.graph.node[0].metadata_props.add(key="pkg.torch.onnx.stack_trace", value="x")
+    onnx.save(model, str(target))
+    assert strip_export_metadata(target) == 1
+    assert strip_export_metadata(target) == 0
+
+
+# --- meta/graph agreement ----------------------------------------------------
+
+
+@pytest.mark.parametrize(("model_id", "meta"), META, ids=META_IDS)
+def test_committed_graph_yields_a_valid_spec(model_id, meta):
+    """`check_meta` derives the spec from the graph + blob; that derivation is what
+    `--fix` trusts. It had two real bugs (`len(layers)` instead of `len(layers)-1`
+    made every 1-layer model read as 2 layers, and the boundary inference ignored
+    zero padding carried by a Conv), so it is pinned here for every export."""
+    from scripts.check_meta import derive_spec
+
+    spec, why = derive_spec(EXPORTS / model_id, meta)
+    assert spec is not None, why
+    assert spec.channel_n == meta["channel_n"]
+    assert spec.hidden_n == meta["hidden_n"]
+    assert spec.hidden_layers == meta.get("hidden_layers", 1)
+    assert spec.cond_n == meta.get("cond_n", 0)
+    assert spec.wrap == meta.get("wrap", True)
+
+
+def test_derive_spec_sees_layers_and_zero_padding():
+    from scripts.check_meta import derive_spec
+
+    by_id = dict(META)
+    deep, _ = derive_spec(EXPORTS / "cross8.mismatch.l=2", by_id["cross8.mismatch.l=2"])
+    assert (deep.hidden_layers, deep.cond_n) == (2, 8)
+    plain, _ = derive_spec(EXPORTS / "crab.growing", by_id["crab.growing"])
+    assert (plain.hidden_layers, plain.cond_n) == (1, 0)
+    # Zero padding with no `Pad` node at all: the perception Conv carries
+    # `pads=[1,1,1,1]`, which is the only evidence that `wrap` is False.
+    onnx = pytest.importorskip("onnx")
+    demo, _ = derive_spec(EXPORTS / "smile.demo", by_id["smile.demo"])
+    assert not any(node.op_type == "Pad" for node in onnx.load(str(EXPORTS / "smile.demo" / "model.onnx")).graph.node)
+    assert demo.wrap is False

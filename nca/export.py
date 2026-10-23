@@ -142,6 +142,38 @@ def export_step(
         dynamo=True,
         external_data=False,  # keep the .onnx self-contained for browser loading
     )
+    strip_export_metadata(path)
+
+
+def strip_export_metadata(path: str | Path) -> int:
+    """Drop ALL exporter metadata (node / graph / model) from a `.onnx` in place.
+
+    None of it is needed to run the graph, and all of it is unstable:
+
+    - `pkg.torch.onnx.stack_trace` embeds the absolute path of `nca/export.py` and
+      the *line numbers* of the traced code, so editing anything above those lines
+      changes the committed bytes (measured: 41 bytes for a 3-line shift) and ships
+      the author's home directory inside a public repo.
+    - `pkg.torch.export.ExportedProgram.range_constraints` names the symbolic
+      dimensions (`{s0, s10, ...}`), which differs between torch versions even when
+      the graph is identical — another spurious `.onnx` diff on re-export.
+
+    What survives is the actual contract: ops, attributes, initializers, input and
+    output shapes. Stripping is idempotent, returns how many props it removed, and
+    makes a re-export of an unchanged model byte-identical — which is what lets
+    `export --all` + `git diff` serve as an exporter-drift guard.
+    """
+    import onnx
+
+    model = onnx.load(str(path))
+    removed = sum(len(node.metadata_props) for node in model.graph.node)
+    removed += len(model.graph.metadata_props) + len(model.metadata_props)
+    if not removed:
+        return 0
+    for holder in (model, model.graph, *model.graph.node):
+        del holder.metadata_props[:]
+    onnx.save(model, str(path))
+    return removed
 
 
 def _make_fire_masks(steps: int, grid: int, rng: np.random.Generator) -> list[np.ndarray]:
@@ -241,6 +273,35 @@ def _git_rev() -> str | None:
         return None
 
 
+def _run_train_json(checkpoint: Path) -> dict:
+    """The run's ``train.json`` as a dict (empty if it is missing or corrupt)."""
+    train_json = checkpoint.parent / "train.json"
+    if not train_json.is_file():
+        return {}
+    try:
+        return json.loads(train_json.read_text())
+    except json.JSONDecodeError:
+        return {}
+
+
+def _train_block(run: dict, overrides: dict | None) -> dict:
+    """What ``meta.json``'s ``train`` block records about the run.
+
+    Only the keys that describe the *experiment* -- the regime and the numbers a
+    model id encodes (``iterations``, ``mismatch_p``) -- so an exported model is
+    reproducible from ``exports/`` alone. ``--train k=v`` overrides win.
+    """
+    cfg = run.get("experiment_config") or {}
+    keys = (
+        "regime", "iterations", "targets", "target_size", "padding", "use_pool",
+        "damage_n", "noise_n", "noise_std", "mismatch_p", "fire_rate", "unroll",
+        "lr", "seed",
+    )
+    block = {k: cfg[k] for k in keys if k in cfg}
+    block.update(overrides or {})
+    return block
+
+
 def _run_layout(checkpoint: Path) -> tuple[int | None, int | None]:
     """``(target_size, padding)`` the run was trained with, from its ``train.json``.
 
@@ -304,7 +365,35 @@ def _update_manifest(out_dir: Path, entry: dict) -> None:
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
 
 
-def reindex(out_dir: Path) -> list[dict]:
+def _refresh_target_artefacts(out_dir: Path, meta: dict) -> str | None:
+    """Re-render ``target.png`` (and ``target.npy``) from the meta alone.
+
+    ``target_size`` + ``padding`` decide the canvas, so a meta that records both
+    can rebuild the picture the run was grown on -- the only way to repair
+    ``target.png`` for the runs whose ``target.npy`` is gone. Returns an error
+    string, or ``None`` on success.
+    """
+    size, pad = meta.get("target_size"), meta.get("padding")
+    specs = meta.get("targets") or [meta.get("target")]
+    if size is None or pad is None or not specs or specs == ["unknown"]:
+        return "no target_size/padding on record"
+    try:
+        target = prepare_targets(list(specs), max_size=int(size), padding=int(pad))
+    except (OSError, ValueError) as exc:
+        return f"could not reload target: {exc}"
+    grid = int(meta.get("grid") or target.shape[-1])
+    if target.shape[-1] != grid:
+        return f"rebuilt canvas {target.shape[-1]} != meta grid {grid}"
+    model_dir = out_dir / meta["id"]
+    model_dir.mkdir(parents=True, exist_ok=True)
+    # Same framing as nca/export.py writes at export time (one frame per model),
+    # so a refresh of an already-correct export is a byte-identical no-op.
+    save_image(render(target)[0], model_dir / "target.png")
+    np.save(model_dir / "target.npy", target.numpy())
+    return None
+
+
+def reindex(out_dir: Path, *, fix_targets: bool = False) -> list[dict]:
     """Rebuild ``manifest.json`` from ``exports/*/meta.json``.
 
     ``meta.json`` is the source of truth and the manifest is a cache of it, so the
@@ -317,6 +406,9 @@ def reindex(out_dir: Path) -> list[dict]:
     for meta_path in sorted(out_dir.glob("*/meta.json")):
         meta = json.loads(meta_path.read_text())
         model_id = meta.get("id") or meta_path.parent.name
+        if fix_targets:
+            error = _refresh_target_artefacts(out_dir, {**meta, "id": model_id})
+            print(f"  {'ok  ' if error is None else 'skip'} {model_id}" + (f": {error}" if error else ""))
         models.append({"id": model_id, "path": f"{model_id}/model.onnx", "meta": meta})
     manifest = {
         "version": 1,
@@ -380,7 +472,7 @@ def export_one(
     grid: int | None,
     dynamic: bool,
     opset: int,
-    experiment: str,
+    experiment: str | None,
     target: str,
     do_verify: bool,
     verify_steps: int,
@@ -389,6 +481,8 @@ def export_one(
     max_size: int | None = None,
     padding: int | None = None,
     carry: dict | None = None,
+    run: dict | None = None,
+    train: dict | None = None,
 ) -> dict:
     import onnx
     import onnxruntime as ort
@@ -403,6 +497,12 @@ def export_one(
     run_size, run_padding = _run_layout(checkpoint)
     max_size = max_size if max_size is not None else run_size
     padding = padding if padding is not None else run_padding
+
+    # The experiment the run recorded (nca/cli.py writes it into train.json), so
+    # a re-export needs no --experiment/--train flags to stay reproducible.
+    run = _run_train_json(checkpoint) if run is None else run
+    train_block = _train_block(run, train)
+    experiment = experiment or train_block.get("regime") or "unknown"
 
     ca = _load_ca(checkpoint, wrap=wrap)
     spec = ca.spec
@@ -476,6 +576,8 @@ def export_one(
         "size_bytes": onnx_path.stat().st_size,
         "git_rev": _git_rev(),
     }
+    if train_block:
+        meta["train"] = train_block
     (model_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
 
     entry = {
@@ -527,7 +629,7 @@ def export_all(
                 grid=int(meta["grid"]) if meta.get("grid") else None,
                 dynamic=bool(meta.get("dynamic_shape", True)),
                 opset=opset,
-                experiment=meta.get("experiment", "unknown"),
+                experiment=meta.get("experiment"),
                 target=meta.get("target", "unknown"),
                 do_verify=do_verify,
                 verify_steps=verify_steps,
@@ -549,6 +651,15 @@ def export_all(
     reindex(out_dir)
     print(f"\nExported {len(exported)} model(s) into {out_dir}")
     return exported
+
+
+def strip_all_metadata(out_dir: Path) -> list[str]:
+    """Strip every ``exports/*/model.onnx`` in place. Returns the models touched."""
+    touched = []
+    for onnx_path in sorted(out_dir.glob("*/model.onnx")):
+        if strip_export_metadata(onnx_path):
+            touched.append(onnx_path.parent.name)
+    return touched
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -584,8 +695,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="fix H/W instead of exporting dynamic spatial axes",
     )
     p.add_argument("--opset", type=int, default=DEFAULT_OPSET)
-    p.add_argument("--experiment", default="unknown")
+    p.add_argument("--experiment", default=None, help="training regime (default: the run's train.json)")
     p.add_argument("--target", default="unknown")
+    p.add_argument(
+        "--train",
+        action="append",
+        default=None,
+        metavar="KEY=VALUE",
+        help="override a recorded train number (e.g. --train mismatch_p=0.3)",
+    )
+    p.add_argument(
+        "--strip-metadata",
+        action="store_true",
+        help="rewrite every exports/*/model.onnx without the exporter's stack-trace "
+        "metadata (no checkpoint needed; makes re-exports byte-stable)",
+    )
+    p.add_argument(
+        "--refresh-targets",
+        action="store_true",
+        help="with --reindex: re-render target.png/target.npy for every meta that records "
+        "target_size+padding (repairs exports whose target.npy is gone)",
+    )
     p.add_argument(
         "--targets",
         nargs="+",
@@ -617,12 +747,37 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _parse_train(items: list[str] | None) -> dict | None:
+    """``--train mismatch_p=0.3`` -> ``{"mismatch_p": 0.3}`` (numbers/bools coerced)."""
+    if not items:
+        return None
+    out: dict = {}
+    for item in items:
+        if "=" not in item:
+            raise SystemExit(f"--train expects KEY=VALUE, got {item!r}")
+        key, raw = item.split("=", 1)
+        for cast in (int, float):
+            try:
+                out[key] = cast(raw)
+                break
+            except ValueError:
+                continue
+        else:
+            out[key] = {"true": True, "false": False}.get(raw.lower(), raw)
+    return out
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
 
+    if args.strip_metadata:
+        models = strip_all_metadata(Path(args.out))
+        print(f"Stripped exporter metadata from {len(models)} model(s) in {Path(args.out)}")
+        return
+
     if args.reindex:
-        models = reindex(Path(args.out))
+        models = reindex(Path(args.out), fix_targets=args.refresh_targets)
         print(f"Reindexed {len(models)} model(s) into {Path(args.out) / 'manifest.json'}")
         return
 
@@ -656,6 +811,7 @@ def main(argv: list[str] | None = None) -> None:
         targets=args.targets,
         max_size=args.target_size,
         padding=args.padding,
+        train=_parse_train(args.train),
     )
 
 

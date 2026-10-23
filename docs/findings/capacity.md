@@ -1,8 +1,8 @@
 # Model capacity (crab / regenerating, 8k iters)
 
 The paper size (C=16, hidden=128, **8336 params**) reaches min loss **2.0e-4**. The
-sweep models are the `exports/crab_c*_h*` entries; regenerate with
-`slurm/submit_capacity_sweep.sh`.
+sweep models are the `exports/cap.c=*.h=*` entries; regenerate with
+`bash slurm/submit_sweep.sh slurm/sweeps/capacity.toml`.
 
 | hidden | C | params | min loss | ×base |
 |---:|---:|---:|---:|---:|

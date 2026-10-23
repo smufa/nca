@@ -42,7 +42,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -92,7 +92,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -142,7 +142,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -192,7 +192,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -242,7 +242,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -292,7 +292,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -342,7 +342,7 @@
           },
           "count": 5514
         },
-        "size_bytes": 37427,
+        "size_bytes": 26114,
         "git_rev": "e7f5a6c",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -392,7 +392,7 @@
           },
           "count": 6284
         },
-        "size_bytes": 41533,
+        "size_bytes": 30220,
         "git_rev": "e7f5a6c",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -479,7 +479,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49782,
+        "size_bytes": 38428,
         "git_rev": "43019bb"
       }
     },
@@ -524,7 +524,7 @@
           },
           "count": 1056
         },
-        "size_bytes": 20609,
+        "size_bytes": 9295,
         "git_rev": "e7f5a6c",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -574,7 +574,7 @@
           },
           "count": 2096
         },
-        "size_bytes": 24771,
+        "size_bytes": 13457,
         "git_rev": "e7f5a6c",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -624,7 +624,7 @@
           },
           "count": 4176
         },
-        "size_bytes": 33091,
+        "size_bytes": 21778,
         "git_rev": "e7f5a6c",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -674,7 +674,7 @@
           },
           "count": 536
         },
-        "size_bytes": 18529,
+        "size_bytes": 7215,
         "git_rev": "e7f5a6c",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -724,7 +724,7 @@
           },
           "count": 3462
         },
-        "size_bytes": 29218,
+        "size_bytes": 17906,
         "git_rev": "e7f5a6c",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -774,7 +774,7 @@
           },
           "count": 4232
         },
-        "size_bytes": 33322,
+        "size_bytes": 22010,
         "git_rev": "e7f5a6c",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -828,7 +828,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -882,7 +882,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -936,7 +936,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -990,7 +990,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -1043,7 +1043,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49374,
+        "size_bytes": 38133,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -1123,7 +1123,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49782,
+        "size_bytes": 38428,
         "git_rev": "3ba443e",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -1202,7 +1202,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49818,
+        "size_bytes": 38428,
         "git_rev": "e82796f",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -1290,7 +1290,7 @@
           },
           "count": 8848
         },
-        "size_bytes": 54178,
+        "size_bytes": 40104,
         "git_rev": "b58eb80",
         "hidden_layers": 1,
         "target_size": 40,
@@ -1379,7 +1379,7 @@
           },
           "count": 8848
         },
-        "size_bytes": 55202,
+        "size_bytes": 41128,
         "git_rev": "b58eb80",
         "hidden_layers": 1,
         "target_size": 40,
@@ -1470,7 +1470,7 @@
           },
           "count": 9360
         },
-        "size_bytes": 56226,
+        "size_bytes": 42152,
         "git_rev": "b58eb80",
         "hidden_layers": 1,
         "target_size": 40,
@@ -1563,7 +1563,7 @@
           },
           "count": 9360
         },
-        "size_bytes": 57250,
+        "size_bytes": 43176,
         "git_rev": "b58eb80",
         "hidden_layers": 1,
         "target_size": 40,
@@ -1657,7 +1657,7 @@
           },
           "count": 18704
         },
-        "size_bytes": 94628,
+        "size_bytes": 80554,
         "git_rev": "fb917cb",
         "target_size": 40,
         "padding": 16
@@ -1753,7 +1753,7 @@
           },
           "count": 25872
         },
-        "size_bytes": 126279,
+        "size_bytes": 110072,
         "git_rev": "fb917cb",
         "target_size": 40,
         "padding": 16
@@ -1835,7 +1835,7 @@
           },
           "count": 8848
         },
-        "size_bytes": 54178,
+        "size_bytes": 40104,
         "git_rev": "1577af4",
         "hidden_layers": 1,
         "target_size": 40,
@@ -1920,7 +1920,7 @@
           },
           "count": 8848
         },
-        "size_bytes": 55202,
+        "size_bytes": 41128,
         "git_rev": "1577af4",
         "hidden_layers": 1,
         "target_size": 40,
@@ -2007,7 +2007,7 @@
           },
           "count": 9360
         },
-        "size_bytes": 56226,
+        "size_bytes": 42152,
         "git_rev": "1577af4",
         "hidden_layers": 1,
         "target_size": 40,
@@ -2096,7 +2096,7 @@
           },
           "count": 9360
         },
-        "size_bytes": 57250,
+        "size_bytes": 43176,
         "git_rev": "1577af4",
         "hidden_layers": 1,
         "target_size": 40,
@@ -2144,7 +2144,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "b87a6ff",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -2194,7 +2194,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "b87a6ff",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -2244,7 +2244,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "b87a6ff",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -2294,7 +2294,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -2344,7 +2344,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -2394,7 +2394,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -2417,7 +2417,7 @@
         "num_parameters": 8336,
         "grid": 32,
         "dynamic_shape": true,
-        "wrap": false,
+        "wrap": true,
         "opset": 19,
         "experiment": "regenerating",
         "target": "emoji:\ud83d\ude00",
@@ -2444,13 +2444,14 @@
           },
           "count": 8336
         },
-        "size_bytes": 48032,
+        "size_bytes": 38103,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
         "learn_perception": false,
-        "target_size": 32,
-        "padding": 0
+        "target_size": 24,
+        "padding": 4,
+        "recovered_from": "target.png matches prepare_targets(['emoji:\ud83d\ude00'], max_size=24, padding=4); the run dir is gone, so the picture is the only evidence"
       }
     },
     {
@@ -2494,7 +2495,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -2544,7 +2545,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -2594,7 +2595,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -2644,7 +2645,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -2694,7 +2695,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "99a3538",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -2744,7 +2745,7 @@
           },
           "count": 8336
         },
-        "size_bytes": 49741,
+        "size_bytes": 38428,
         "git_rev": "b87a6ff",
         "hidden_layers": 1,
         "cond_n": 0,
@@ -2754,5 +2755,5 @@
       }
     }
   ],
-  "generated": "2026-10-23T01:43:35"
+  "generated": "2026-10-23T02:08:56"
 }

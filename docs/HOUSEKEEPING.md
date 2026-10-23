@@ -103,13 +103,19 @@ and no re-export is required. Only Phase 6 (features) changes the graph.
   differing only by `dynamic_shape` — a naming problem, not two runs. (Phase 2
   resolved the naming: `crab.regenerating.ckpt=8000` vs `…8000.static`.)
 - **Found while renaming**: re-exporting `crab.regenerating.c=6.h=128` from its
-  surviving checkpoint (`runs/cap_c6_h128`) produces a `model.onnx` **41 bytes
-  larger** (29218 -> 29259) than the committed one, parity still 3.8e-06 — so one
-  committed graph predates a change in `nca/export.py`. Every other export
-  re-exported byte-identically. Nothing in CI can see this: it needs the
-  checkpoint. The guard is a periodic `nca.export --all` with a clean `git diff`
-  (24 of 45 checkpoints are in `/tmp`, so this is also why they should be
-  archived under `runs/`).
+  surviving checkpoint (`runs/cap_c6_h128`) produced a `model.onnx` **41 bytes
+  larger** than the committed one (parity unchanged, 3.8e-06). Every other export
+  re-exported byte-identically. Root cause, found in Phase 3: the dynamo exporter
+  stamps `pkg.torch.onnx.stack_trace` on every node, and it contains
+  `nca/export.py` **line numbers** — the file had shifted by three lines. A second
+  contributor, `pkg.torch.export.ExportedProgram.range_constraints`, names the
+  symbolic dims (`{s0, s10}` vs `{s0, s10, s43, s51}`) and varies by torch
+  version. Both are non-semantic, and both would make `export --all` + `git diff`
+  (the only possible exporter-drift guard, since CI has no checkpoints) permanently
+  noisy. `nca/export.py` now strips them (`--strip-metadata` for existing graphs);
+  a fresh re-export of that model is **byte-identical** to the committed one, and
+  the files shrank 39% (29 kB -> 18 kB, no more local paths in a public repo).
+  `tests/test_export.py` fails if a committed graph carries metadata again.
 
 ---
 
@@ -319,23 +325,66 @@ without regexes; old URLs break once, loudly (no silent wrong model).
 
 ## Phase 3 — Experiments as data
 
-- [ ] `nca/experiments.py`: `@dataclass Experiment(name, targets, regime, noise,
+- [x] `nca/experiments.py`: `@dataclass Experiment(name, targets, regime, noise,
       mismatch_p, unroll, lr_milestones, ...)` plus named presets. Kills the
       `preset[...] if args.x is None else args.x` triple in `cli.py:182-187` —
       every default has exactly one home.
-- [ ] `slurm/sweeps/*.toml`: one file per study (`emoji-sweep`, `capacity`,
+- [x] `slurm/sweeps/*.toml`: one file per study (`emoji-sweep`, `capacity`,
       `multi`, `cross`, `grid-scaling`, …), each listing runs with an explicit
       `name:` and `group:`.
-- [ ] **One** `slurm/submit_sweep.sh <toml>` replacing the four near-identical
+- [x] **One** `slurm/submit_sweep.sh <toml>` replacing the four near-identical
       scripts (`submit_sweep.sh`, `submit_capacity_sweep.sh`,
       `submit_multitarget_sweep.sh`, `submit_crosstarget_sweep.sh`), each of which
       re-declares `PARTITION/CONSTRAINT/GRES/TIME/MEM/CPUS` and the same `sbatch`
       line.
-- [ ] `meta.json` records the `Experiment` (`train:` block) so a model's regime
+- [x] `meta.json` records the `Experiment` (`train:` block) so a model's regime
       is reproducible from the export alone.
 
 **Acceptance:** adding a sweep = adding a TOML file, no shell edits; the four
 current studies are reproducible from their TOMLs.
+
+### Phase 3 notes (done)
+
+- **Done.** `nca/experiments.py` (`Experiment`, `REGIMES`, `Sweep`,
+  `load_sweep`, `experiment_from_run_dir`), `nca/sweep.py` (`python -m nca.sweep`,
+  renders the sbatch calls), six `slurm/sweeps/*.toml`, and one
+  `slurm/submit_sweep.sh`; the three per-study shell scripts are deleted.
+- The `preset[...] if args.x is None else args.x` ladder is gone: CLI flags default
+  to `None` and are applied as overrides, so `Experiment()` *is* the CLI default
+  (`tests/test_experiments.py::test_cli_defaults_come_from_the_experiment`).
+- Precedence is `--config/--run` (file) < explicit flags < `--set k=v`.
+- A run records `experiment_config` in `train.json`; the exporter copies it into
+  `meta.json`'s `train` block, so `--experiment`/`--train` became *corrections*,
+  not inputs. Old runs without the block are reconstructed from
+  `spec.json`+`train.json` (`experiment_from_run_dir`).
+- Run names are the export ids (`cap.c=16.h=8` was `cap_c16_h8`), so a run dir,
+  its checkpoint and its export share one label.
+- `tests/test_experiments.py::test_every_exported_model_has_a_toml_recipe` fails
+  if an export with a `sweep` label has no `[[run]]` — the TOMLs cannot silently
+  rot behind `exports/`.
+
+### Phase 3 by-products
+
+- **`export --strip-metadata`** (new): drops the exporter's non-semantic metadata
+  (`stack_trace` with `nca/export.py` line numbers + the author's home path, and
+  `range_constraints` naming symbolic dims that vary by torch version). A
+  re-export of an unchanged model is now **byte-identical**, which is what makes
+  "`export --all` then `git diff`" usable as the exporter-drift guard. Committed
+  graphs shrank 39% (29 kB -> 18 kB) and no longer leak local paths.
+- **`--reindex --refresh-targets`** re-renders `target.png` + `target.npy` from
+  `target_size`/`padding`, and is a byte-identical no-op on a correct export. It
+  also wrote the 45 missing `exports/*/target.npy`, so each export is now
+  self-contained. Writing `target.npy` uses the same single-frame framing as
+  `export_one`, which is why the 35 already-correct `target.png` did not change.
+- **The demo recipe was recovered, not assumed**: `smile.demo`'s meta said
+  `target_size=32, padding=0`, but re-rendering that way produced a different
+  picture. `prepare_targets(['emoji:😀'], max_size=24, padding=4)` reproduces the
+  committed `target.png` byte-for-byte, so the meta was corrected (with a
+  `recovered_from` note) and `demo.toml` uses 24/4. A wrong number in a meta is
+  invisible until something re-derives an artefact from it.
+- Not done, still open: a `grid-scaling` study (the only sweep in the plan with no
+  committed runs) and `meta.json` for the two `experiments.toml` runs predating
+  `iteration` bookkeeping (`--train iteration=N` fills it in by hand).
 
 ---
 

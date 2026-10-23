@@ -1,0 +1,49 @@
+# How many emoji can one conditional model reproduce?
+#
+# Each run gets the first N of a fixed target list (so the runs are nested), and
+# the model receives an N-way one-hot selector appended to its perception. The
+# list order is load-bearing: `multi4` is the first four of the eight.
+
+[sweep]
+name = "multitarget"
+group = "multitarget"
+
+[resources]
+partition = "mig-priority"
+constraint = "mig"
+gres = "gpu:1g.10gb:1"
+time = "02:00:00"
+mem = "16G"
+cpus = 4
+
+[defaults]
+regime = "regenerating"
+target_size = 40
+padding = 16
+batch_size = 16
+iterations = 8000
+unroll = [64, 96]
+log_every = 25
+ckpt_every = 500
+
+[[run]]
+name = "multi2.matched"
+targets = ["emoji:1f980", "emoji:1f419"]
+
+[[run]]
+name = "multi4.matched"
+targets = ["emoji:1f980", "emoji:1f419", "emoji:1f996", "emoji:1f422"]
+
+[[run]]
+name = "multi6.matched"
+targets = [
+  "emoji:1f980", "emoji:1f419", "emoji:1f996",
+  "emoji:1f422", "emoji:1f335", "emoji:1f344",
+]
+
+[[run]]
+name = "multi8.matched"
+targets = [
+  "emoji:1f980", "emoji:1f419", "emoji:1f996", "emoji:1f422",
+  "emoji:1f335", "emoji:1f344", "emoji:1f41d", "emoji:1f9a9",
+]

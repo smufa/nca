@@ -75,7 +75,8 @@ RECOVERED: dict[str, dict] = {
     **{
         old: {
             "mismatch_p": 0.3,
-            "recovered_from": "slurm/submit_crosstarget_sweep.sh (MISMATCH_P default)",
+                            "recovered_from": "slurm/submit_crosstarget_sweep.sh (MISMATCH_P default; "
+                            "the study now lives in slurm/sweeps/cross.toml)",
         }
         for old in ("cross2", "cross4", "cross6", "cross8", "cross8_wide", "cross8_deep")
     },
