@@ -1,0 +1,31 @@
+# The playground demo: a small 32x32 canvas (24px emoji + 4px border), short run,
+# the picker as "smile · demo" and loaded with ?model=smile.demo.
+#
+#   bash slurm/submit_sweep.sh slurm/sweeps/demo.toml     # on the cluster
+#   uv run python main.py --config slurm/sweeps/demo.toml --device cpu   # locally
+
+[sweep]
+name = "demo"
+group = "demo"
+
+[resources]
+partition = "gpu"
+constraint = "h100"
+gres = "gpu:1"
+time = "00:30:00"
+mem = "16G"
+cpus = 4
+
+[defaults]
+target = "emoji:😀"
+regime = "regenerating"
+target_size = 24
+padding = 4
+batch_size = 8
+iterations = 4000
+unroll = [48, 64]
+log_every = 25
+ckpt_every = 500
+
+[[run]]
+name = "smile.demo"

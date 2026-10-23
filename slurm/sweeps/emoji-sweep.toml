@@ -1,0 +1,121 @@
+# 6 emoji x 3 regimes = the 18 models of the 2020-paper reproduction.
+#
+# Names are the export ids (`exports/<name>/`), so a run, its checkpoint and its
+# export carry the same label. Submit with
+#
+#   bash slurm/submit_sweep.sh slurm/sweeps/emoji-sweep.toml
+#   bash slurm/submit_sweep.sh slurm/sweeps/emoji-sweep.toml --only crab.growing
+#
+# The regimes differ only in pool/damage/noise, which is why they are one word
+# here and not four flags per run.
+
+[sweep]
+name = "emoji-sweep"
+group = "emoji-sweep"
+
+[resources]
+partition = "gpu"
+constraint = "h100"
+gres = "gpu:1"
+time = "12:00:00"
+mem = "64G"
+cpus = 8
+
+[defaults]
+target_size = 40
+padding = 16
+batch_size = 16
+iterations = 8000
+unroll = [64, 96]
+log_every = 25
+ckpt_every = 250
+
+[[run]]
+name = "cactus.growing"
+target = "emoji:1f335"
+regime = "growing"
+
+[[run]]
+name = "cactus.persistent"
+target = "emoji:1f335"
+regime = "persistent"
+
+[[run]]
+name = "cactus.regenerating"
+target = "emoji:1f335"
+regime = "regenerating"
+
+[[run]]
+name = "crab.growing"
+target = "emoji:1f980"
+regime = "growing"
+
+[[run]]
+name = "crab.persistent"
+target = "emoji:1f980"
+regime = "persistent"
+
+[[run]]
+name = "crab.regenerating"
+target = "emoji:1f980"
+regime = "regenerating"
+
+[[run]]
+name = "mushroom.growing"
+target = "emoji:1f344"
+regime = "growing"
+
+[[run]]
+name = "mushroom.persistent"
+target = "emoji:1f344"
+regime = "persistent"
+
+[[run]]
+name = "mushroom.regenerating"
+target = "emoji:1f344"
+regime = "regenerating"
+
+[[run]]
+name = "octopus.growing"
+target = "emoji:1f419"
+regime = "growing"
+
+[[run]]
+name = "octopus.persistent"
+target = "emoji:1f419"
+regime = "persistent"
+
+[[run]]
+name = "octopus.regenerating"
+target = "emoji:1f419"
+regime = "regenerating"
+
+[[run]]
+name = "trex.growing"
+target = "emoji:1f996"
+regime = "growing"
+
+[[run]]
+name = "trex.persistent"
+target = "emoji:1f996"
+regime = "persistent"
+
+[[run]]
+name = "trex.regenerating"
+target = "emoji:1f996"
+regime = "regenerating"
+
+[[run]]
+name = "turtle.growing"
+target = "emoji:1f422"
+regime = "growing"
+
+[[run]]
+name = "turtle.persistent"
+target = "emoji:1f422"
+regime = "persistent"
+
+[[run]]
+name = "turtle.regenerating"
+target = "emoji:1f422"
+regime = "regenerating"

@@ -1,0 +1,87 @@
+"""Every committed ``exports/*/meta.json`` must agree with ``ModelSpec``.
+
+This is the repo-wide shape gate: it re-derives ``channel_n``/``hidden_n``/
+``hidden_layers``/``cond_n``/``num_parameters``, the ``weights`` block (offsets,
+count, padding) and the ONNX graph inputs from ``nca/spec.py``. The checker is
+``scripts/check_meta.py`` -- the same code the CLI runs, so a failure here is
+reproducible with ``python -m scripts.check_meta --only <model>``.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+
+from scripts.check_meta import EXPORTS, check_model  # noqa: E402
+
+if not EXPORTS.is_dir():
+    pytest.skip("no exports/ directory", allow_module_level=True)
+
+MODEL_DIRS = sorted(p for p in EXPORTS.iterdir() if p.is_dir() and (p / "meta.json").is_file())
+MODEL_IDS = [p.name for p in MODEL_DIRS]
+
+
+@pytest.mark.parametrize("model_dir", MODEL_DIRS, ids=MODEL_IDS)
+def test_meta_matches_spec(model_dir):
+    meta, problems = check_model(model_dir)
+    errors = [str(p) for p in problems if p.level == "error"]
+    assert meta is not None, f"{model_dir.name}: meta.json unreadable"
+    assert not errors, f"{model_dir.name}:\n  " + "\n  ".join(errors)
+
+
+def test_manifest_lists_every_exported_model():
+    import json
+
+    manifest = json.loads((EXPORTS / "manifest.json").read_text())
+    listed = [m["id"] for m in manifest["models"]]
+    assert listed == sorted(MODEL_IDS)
+    for entry in manifest["models"]:
+        assert entry["path"] == f"{entry['id']}/model.onnx"
+        # The manifest embeds a copy, so it must be the copy -- not a stale one.
+        meta = json.loads((EXPORTS / entry["id"] / "meta.json").read_text())
+        assert entry["meta"] == meta, f"{entry['id']}: manifest entry != meta.json"
+
+
+def test_check_manifest_flags_drift(tmp_path):
+    """A hand-edited manifest is drift like any other; --fix is what repairs it."""
+    import json
+
+    from scripts.check_meta import check_manifest
+
+    entry = {"id": "a.b", "path": "a.b/model.onnx", "meta": {"id": "a.b", "grid": 72}}
+    (tmp_path / "manifest.json").write_text(json.dumps({"version": 1, "models": [entry]}))
+    metas = {"a.b": {"id": "a.b", "grid": 72}}
+    assert check_manifest(tmp_path, metas) == []
+
+    metas["a.b"] = {**metas["a.b"], "grid": 80}
+    problems = check_manifest(tmp_path, metas)
+    assert [model_id for model_id, _ in problems] == ["a.b"]
+    assert "drifted" in str(problems[0][1])
+
+    metas["c.d"] = {"id": "c.d", "grid": 72}  # a meta with no manifest entry
+    reported = {str(p) for _, p in check_manifest(tmp_path, metas)}
+    assert reported == {
+        "[error] manifest entry drifted (grid: manifest=72 meta=80)",
+        "[error] missing from manifest.json (run --reindex)",
+    }
+
+
+def test_committed_loss_blocks_are_drawable():
+    """The picker draws `meta.loss` directly; every recorded curve must be sane."""
+    import json
+    from pathlib import Path
+
+    exports = Path(__file__).resolve().parents[1] / "exports"
+    for meta_path in sorted(exports.glob("*/meta.json")):
+        loss = json.loads(meta_path.read_text()).get("loss")
+        if loss is None:
+            continue
+        assert 0 < len(loss["points"]) <= 64, meta_path
+        assert all(isinstance(v, (int, float)) for v in loss["points"]), meta_path
+        assert 0.0 <= loss["min_at"] <= 1.0, meta_path
+        assert loss["logged"] >= len(loss["points"]), meta_path

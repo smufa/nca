@@ -53,13 +53,15 @@ sbatch -p mig-priority --constraint=mig --gres=gpu:1g.10gb:1 \
   batch) — it only helps on an under-utilised H100. Keep batch 16 for comparable
   models; note memory is ~linear in `batch_size x train_steps` (5.6 GB at 16x80).
 - The node has 250 GB RAM, so `train.sbatch`'s default `--mem=64G` fits only **3**
-  jobs. `slurm/submit_sweep.sh` overrides `MEM=16G CPUS=4` so all 14 slices run at
-  once (an 18-job sweep then takes ~2 h).
+  jobs. The `[resources]` block of a sweep sets `mem = "16G"`, `cpus = 4` so all
+  14 slices run at once (an 18-job sweep then takes ~2 h).
 
 ## Environment
 
-`requires-python` was relaxed to `>=3.12` so the cluster can use stable Python
-3.13 (uv would otherwise pull a 3.14 release candidate).
+`requires-python` is `>=3.13`: **3.14** is the laptop dev version
+(`.python-version`), **3.13** is what the cluster runs (`uv sync --python 3.13`
+below). CI exercises both, so neither can rot. (Relaxing from `>=3.12` was what let
+uv pick 3.14 locally — the floor is the cluster's version, not the laptop's.)
 
 Local env is unchanged (CPU torch via `[tool.uv.sources]`). On the cluster:
 
@@ -115,16 +117,49 @@ Fallback if we want zero lock divergence: `uv venv --python 3.13` +
 
 - `slurm/train.sbatch` — one job; sources `.venv`, `unset PYTHONPATH PYTHONHOME`,
   forwards its args to `main.py --device cuda`. Pins `--constraint=h100`.
-- `slurm/submit_sweep.sh` — submits experiments 1–3 for each target, with
-  `PARTITION` / `CONSTRAINT` / `GRES` / `TIME` / `MEM` / `CPUS` overrides:
+- `slurm/sweeps/*.toml` — **what** to train. One file per study, one `[[run]]`
+  per model; `[resources]` is the placement, `[defaults]` the shared knobs:
 
-  ```bash
-  bash slurm/submit_sweep.sh                       # gpu partition (H100)
-  PARTITION=mig-priority CONSTRAINT=mig GRES=gpu:1g.10gb:1 TIME=02:00:00 \
-    MEM=16G CPUS=4 bash slurm/submit_sweep.sh      # all MIG slices
+  ```toml
+  [resources]
+  partition = "mig-priority"
+  constraint = "mig"
+  gres = "gpu:1g.10gb:1"
+  time = "02:00:00"
+  mem = "16G"
+  cpus = 4
+
+  [defaults]
+  regime = "regenerating"
+  target_size = 40
+  padding = 16
+  iterations = 8000
+
+  [[run]]
+  name = "crab.growing"          # <- also the export id
+  target = "emoji:1f980"
+  regime = "growing"
   ```
 
-  Targets use **codepoint** specs (`emoji:1f980`) so ssh/locale can't mangle emoji.
+  `nca/experiments.py` validates the file (unknown keys are errors) and
+  `nca/sweep.py` renders the sbatch calls.
+- `slurm/submit_sweep.sh <file>` — the only entry point; every per-sweep script
+  (`submit_capacity_sweep.sh`, `submit_multitarget_sweep.sh`,
+  `submit_crosstarget_sweep.sh`) is now a TOML plus flags:
+
+  ```bash
+  bash slurm/submit_sweep.sh slurm/sweeps/emoji-sweep.toml --dry-run
+  bash slurm/submit_sweep.sh slurm/sweeps/emoji-sweep.toml                  # 18 jobs
+  bash slurm/submit_sweep.sh slurm/sweeps/emoji-sweep.toml --only crab.growing
+  PARTITION=mig-priority CONSTRAINT=mig GRES=gpu:1g.10gb:1 MEM=16G CPUS=4 \
+    bash slurm/submit_sweep.sh slurm/sweeps/cross.toml                     # MIG slices
+  DEPEND=20754359 bash slurm/submit_sweep.sh slurm/sweeps/cross.toml       # after those jobs
+  ```
+
+  The job name in `squeue` is the model id, so a queued run is already labelled
+  `cross8.mismatch`.
+
+Targets use **codepoint** specs (`emoji:1f980`) so ssh/locale can't mangle emoji.
 
 New emoji set (distinct from the paper's):
 
@@ -134,10 +169,24 @@ New emoji set (distinct from the paper's):
 | octopus | 🐙 | cactus | 🌵 |
 | trex | 🦖 | turtle | 🐢 |
 
-```bash
-bash slurm/submit_sweep.sh              # all 6 targets x 3 experiments = 18 jobs
-bash slurm/submit_sweep.sh crab         # just one target
-```
+The committed studies:
+
+| file | runs | what |
+| --- | --- | --- |
+| `emoji-sweep.toml` | 18 | 6 emoji × {growing, persistent, regenerating} |
+| `capacity.toml` | 9 | channel/hidden width on the crab |
+| `multi.toml` | 4 | 1 conditional model, 2/4/6/8 targets |
+| `cross.toml` | 6 | same, with `mismatch_p = 0.3` (+ hidden/layer variants) |
+| `experiments.toml` | 2 | learnt perception, `noisy` regime |
+| `demo.toml` | 1 | the 32×32 playground demo (`smile.demo`) |
+
+Every exported model with a `sweep` label has a `[[run]]` here —
+`tests/test_experiments.py::test_every_exported_model_has_a_toml_recipe` enforces
+it, so a model in `exports/` can always be retrained from the repo.
+
+Defaults live in **`nca/experiments.py`** (`Experiment` fields + the `REGIMES`
+table), not in `nca/cli.py`. Change them there, once: the CLI, every sweep file
+and the recorded `train.json` all read the same values.
 
 ## Suggested H100 config (paper settings)
 
@@ -194,12 +243,19 @@ cd ~/nca && uv sync --no-sources --python 3.13 --group dev
 1. Push the repo, clone on the cluster, `uv sync`.
 2. **Smoke test**: `srun -p gpu --constraint=h100 --gres=gpu:1 --time=00:10:00 \
    --pty bash` then a 100-iteration run to confirm H100 + cu13 torch.
-3. `bash slurm/submit_sweep.sh`.
+3. `bash slurm/submit_sweep.sh slurm/sweeps/emoji-sweep.toml`.
 4. Monitor: `squeue -u $USER`, `tail -f logs/*.out`, `sacct -j <id>`.
 5. Export ONNX. Either on the login node (`uv run python -m nca.export ...`, same
    `unset PYTHONPATH` caveat) or pull the small `ckpt_final.pt` + `target.npy`
    back with rsync and export locally (the exporter needs the `dev` group).
-6. Commit `exports/`, open the frontend.
+
+   The run's `train.json` now carries the whole experiment
+   (`experiment_config`), and the exporter copies it into `meta.json`'s `train`
+   block — so `--experiment`/`--train` flags are only for correcting a record,
+   never for describing a run.
+6. Commit `exports/`, open the frontend. `--reindex --refresh-targets` re-renders
+   `target.png`/`target.npy` for every meta that records `target_size`+`padding`
+   (a no-op for correct exports).
 
 ## Milestones
 

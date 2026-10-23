@@ -1,7 +1,28 @@
 /** Types mirroring `exports/<id>/meta.json` and `exports/manifest.json`. */
 
+export interface LossCurve {
+  /** Bucket-averaged losses (<= 64 samples), oldest first. */
+  points: number[];
+  /** How many entries the run logged (the curve is these, averaged). */
+  logged: number;
+  min: number;
+  final: number;
+  /** Where `min` occurred, as a fraction of the run (0..1). */
+  min_at: number;
+}
+
 export interface ModelMeta {
   id: string;
+  /** The id, duplicated in meta; the id *is* the name (see docs/HOUSEKEEPING.md). */
+  name?: string;
+  /** Which study produced the model: the picker's group key. */
+  sweep?: string;
+  /** Recovered training facts the id encodes (iteration, mismatch_p, ...). */
+  train?: Record<string, string | number>;
+  /** Presentation override; absent means "derive it from the id". */
+  picker?: { group?: string; label?: string; order?: number };
+  /** The training curve, for the picker sparkline (absent on old exports). */
+  loss?: LossCurve;
   created: string;
   channel_n: number;
   hidden_n: number;
@@ -77,57 +98,65 @@ export const GROUP_ORDER = [
   'Demos',
 ];
 
+/** `meta.sweep` -> picker group. A model without a known sweep lands in "Other". */
+export const SWEEP_GROUPS: Record<string, string> = {
+  'emoji-sweep': 'Emoji sweep',
+  capacity: 'Crab · capacity',
+  checkpoints: 'Crab · checkpoints',
+  experiments: 'Crab · experiments',
+  multitarget: 'Multi-target',
+  crosstarget: 'Multi-target',
+  demo: 'Demos',
+};
+
+/** `c=16.h=8` -> 160008, so the capacity list reads c-major then h. */
+function orderOf(id: string): number {
+  const num = (key: string): number => {
+    const m = new RegExp(`[.]${key}=(\\d+)`).exec(id);
+    return m ? Number(m[1]) : 0;
+  };
+  // Conditional sweeps: by N, then the plain run before its wide/deep variants.
+  const cond = /^(?:multi|cross)(\d+)[.]/.exec(id);
+  if (cond) {
+    const sub = id.includes('.h=') ? 1 : id.includes('.l=') ? 2 : 0;
+    return 1000 * Number(cond[1]) + sub;
+  }
+  const c = num('c');
+  const h = num('h');
+  if (c || h) return c * 10000 + h;
+  return num('ckpt');
+}
+
+/** `crab.regenerating.c=16.h=8` -> "c=16 h=8", `...ckpt=2000` -> "@2000". */
+function labelOf(id: string, sweep: string | undefined): string {
+  const [subject, task, ...rest] = id.split('.');
+  if (sweep === 'emoji-sweep') return `${subject} · ${task}`;
+  const cond = /^(?:multi|cross)(\d+)$/.exec(subject);
+  if (cond) {
+    const kind = subject.startsWith('cross') ? 'cross' : 'matched';
+    // `mismatch=0.3` is the same for the whole cross family: it is the sweep.
+    const variant = rest.filter((s) => !s.startsWith('mismatch=')).join(' ');
+    return `${cond[1]} emoji · ${kind}${variant ? ` · ${variant}` : ''}`;
+  }
+  const knobs = rest.join(' ').replace(/\bckpt=(\d+)/, '@$1');
+  if (knobs) return knobs;
+  return sweep === 'demo' ? subject : task;
+}
+
 /**
- * Presentation grouping for the model picker, derived from the model id so no
- * manifest bookkeeping is needed. Falls back to a single "Other" group.
+ * Presentation grouping for the model picker.
+ *
+ * The group comes from `meta.sweep` (written by the sweep that produced the model),
+ * the label and the sort key from the dotted id; `meta.picker` overrides any of
+ * them. Nothing here parses legacy `crab_c16_h64`-style names -- that grammar is
+ * gone (see `scripts/rename_exports.py`, which holds the one-time mapping).
  */
 export function modelGroup(m: ManifestModel): ModelGroup {
-  const id = m.id;
-  // Capacity sweep: crab_c6_h128, crab_c16_h64
-  let mt = /^\w+_c(\d+)_h(\d+)$/.exec(id);
-  if (mt) {
-    const c = Number(mt[1]);
-    const h = Number(mt[2]);
-    return { group: 'Crab · capacity', label: `C=${c} h=${h}`, order: c * 10000 + h };
-  }
-  // Training checkpoints: crab_regen_2000, crab_regen_8000_static
-  mt = /^\w+_regen_(\d+)(_static)?$/.exec(id);
-  if (mt) {
-    return {
-      group: 'Crab · checkpoints',
-      label: `@${mt[1]}${mt[2] ? ' static' : ''}`,
-      order: Number(mt[1]),
-    };
-  }
-  // Conditional multi-target runs: multi2..8 (matched pairs) / cross2..8 (a slice
-  // of each batch is asked to convert one grown target into another).
-  mt = /^multi(\d+)$/.exec(id);
-  if (mt) {
-    const n = Number(mt[1]);
-    return { group: 'Multi-target', label: `${n} emoji`, order: 1000 * n };
-  }
-  mt = /^cross(\d+)(?:_(wide|deep))?$/.exec(id);
-  if (mt) {
-    const n = Number(mt[1]);
-    const variant = mt[2] ? ` · ${mt[2]}` : '';
-    // same N groups together, expanding (plain, wide, deep); '' sorts before the rest
-    const sub = mt[2] === 'wide' ? 1 : mt[2] === 'deep' ? 2 : 0;
-    // N first, then variant; scaled so all 8 wide/deep land after the plain set
-    return {
-      group: 'Multi-target',
-      label: `${n} emoji · cross${variant}`,
-      order: 1000 * n + sub,
-    };
-  }
-  if (id === 'smile-demo') return { group: 'Demos', label: 'smile', order: 0 };
-  // Regime sweep: cactus_growing, crab_regenerating, ...
-  mt = /^(\w+)_(growing|persistent|regenerating)$/.exec(id);
-  if (mt) return { group: 'Emoji sweep', label: `${mt[1]} · ${mt[2]}`, order: 0 };
-  // One-off study runs on the crab (crab_learnperc, crab_noisy, ...). Must come
-  // after the regime rule so crab_growing / crab_regenerating stay in the sweep.
-  mt = /^crab_(.+)$/.exec(id);
-  if (mt) {
-    return { group: 'Crab · experiments', label: mt[1].replace(/_/g, ' '), order: 0 };
-  }
-  return { group: 'Other', label: id, order: 0 };
+  const picker = m.meta.picker ?? {};
+  const sweep = m.meta.sweep;
+  return {
+    group: picker.group ?? (sweep ? (SWEEP_GROUPS[sweep] ?? `Other · ${sweep}`) : 'Other'),
+    label: picker.label ?? labelOf(m.id, sweep),
+    order: picker.order ?? orderOf(m.id),
+  };
 }

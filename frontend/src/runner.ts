@@ -8,7 +8,8 @@ import {
   seedState,
 } from './nca';
 import type { Rng } from './nca';
-import type { CaEngine } from './engine';
+import type { CaEngine, Capabilities, Support } from './engine';
+import { checkSpec } from './engine';
 
 // Single-threaded WASM core: enough for the compatibility path, and it avoids
 // needing cross-origin-isolation (SharedArrayBuffer) headers.
@@ -28,6 +29,33 @@ if (_log) ort.env.logLevel = _log === 'verbose' ? 'verbose' : 'info';
  * cannot represent (see `ShaderRunner.supports`).
  */
 export class CaRunner implements CaEngine {
+  /**
+   * The compatibility path: ORT runs whatever the graph contains, so the shape
+   * limits are unbounded. It has no GPU brush and no zero-copy render -- those are
+   * shader-only, and the UI reads *that* from here instead of probing `?.`.
+   */
+  static readonly CAPABILITIES: Capabilities = {
+    kind: 'ort',
+    label: 'WASM',
+    cond: true,
+    gpuBrush: false,
+    gpuRender: false,
+    workSkip: false,
+    maxC: Infinity,
+    maxHidden: Infinity,
+    maxLayers: Infinity,
+    maxCond: Infinity,
+    maxPerc: Infinity,
+    maxGridPx: Infinity,
+  };
+
+  static supports(model: ManifestModel): Support {
+    return checkSpec(CaRunner.CAPABILITIES, model.meta);
+  }
+
+  get capabilities(): Capabilities {
+    return CaRunner.CAPABILITIES;
+  }
   readonly meta: ManifestModel['meta'];
   readonly channelN: number;
   grid: number;

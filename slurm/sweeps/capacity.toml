@@ -1,0 +1,71 @@
+# How small can the update rule get before the pattern degrades?
+#
+# One target (the regenerating crab, the full-size baseline at hidden 128 and 16
+# channels), swept along two axes. The `c=16.h=128` run is the same experiment as
+# `crab.regenerating` in emoji-sweep.toml, kept separate because it was trained
+# separately -- compare the two to see the run-to-run spread.
+#
+# All of these fit the native `shader` engine (C in 4..16, hidden % 4 == 0);
+# anything outside that range falls back to the WASM engine automatically.
+
+[sweep]
+name = "capacity"
+group = "capacity"
+
+[resources]
+partition = "mig-priority"
+constraint = "mig"
+gres = "gpu:1g.10gb:1"
+time = "02:00:00"
+mem = "16G"
+cpus = 4
+
+[defaults]
+target = "emoji:1f980"
+regime = "regenerating"
+target_size = 40
+padding = 16
+batch_size = 16
+iterations = 8000
+unroll = [64, 96]
+amp = "bf16"
+log_every = 25
+ckpt_every = 500
+
+# hidden-width sweep at the paper's 16 channels
+[[run]]
+name = "crab.regenerating.c=16.h=8"
+hidden = 8
+
+[[run]]
+name = "crab.regenerating.c=16.h=16"
+hidden = 16
+
+[[run]]
+name = "crab.regenerating.c=16.h=32"
+hidden = 32
+
+[[run]]
+name = "crab.regenerating.c=16.h=64"
+hidden = 64
+
+[[run]]
+name = "crab.regenerating.c=16.h=128"
+hidden = 128
+
+# channel-count sweep at the paper's 128 hidden units
+[[run]]
+name = "crab.regenerating.c=6.h=128"
+channels = 6
+
+[[run]]
+name = "crab.regenerating.c=8.h=128"
+channels = 8
+
+[[run]]
+name = "crab.regenerating.c=10.h=128"
+channels = 10
+
+[[run]]
+name = "crab.regenerating.c=12.h=128"
+channels = 12

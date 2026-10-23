@@ -9,13 +9,14 @@ from __future__ import annotations
 import json
 import random
 import time
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 
+from .losses import Loss
 from .model import NeuralCA
 from .pool import SamplePool
 from .viz import growth_frames, plot_loss, render, save_gif, save_image, tile
@@ -48,8 +49,10 @@ class TrainConfig:
     gif_scale: int = 3
     make_gif: bool = True
     seed: int = 0
-    compile: bool = False
     amp: str = "off"  # off | bf16
+    # Extra loss terms (nca/losses.py), as a JSON-safe dict so `asdict(cfg)`
+    # records them in train.json. None = the historical pixel-only MSE.
+    loss: dict | None = None
 
 
 def per_sample_loss(x: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -84,7 +87,9 @@ def _train_step(
     cfg: TrainConfig,
     masks: torch.Tensor,
     cond: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor]:
+    criterion: "Loss | None" = None,
+    progress: float = 1.0,
+) -> tuple[torch.Tensor, torch.Tensor, dict[str, float]]:
     """One optimiser step over the unroll. Returns ``(final_state, loss)``.
 
     ``loss`` is detached but **left on the device**: the caller materialises the
@@ -94,7 +99,16 @@ def _train_step(
         device_type="cuda", dtype=torch.bfloat16, enabled=cfg.amp == "bf16"
     ):
         x = forward(x0, masks, cond)
-    loss = loss_fn(x, target)  # fp32, so the reported loss stays comparable
+    # fp32 and outside autocast, so the reported loss stays comparable across runs.
+    if criterion is None:
+        loss = loss_fn(x, target)
+        components: dict[str, float] = {}
+    else:
+        # The criterion reduces per sample (so a term can be inspected per sample);
+        # the optimiser wants one number.
+        loss, parts = criterion(x.float(), target, progress)
+        loss = loss.mean()
+        components = {k: float(v) for k, v in parts.items()}
 
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
@@ -104,7 +118,7 @@ def _train_step(
             norms = torch._foreach_norm(grads)
             torch._foreach_div_(grads, [n + 1e-8 for n in norms])
     optimizer.step()
-    return x.detach(), loss.detach()
+    return x.detach(), loss.detach(), components
 
 
 def _save_resume_state(
@@ -119,6 +133,7 @@ def _save_resume_state(
     losses: list[float],
     pool: SamplePool | None,
     save_pool: bool = False,
+    components: dict[str, list[float]] | None = None,
 ) -> None:
     state = {
         "model": ca.state_dict(),
@@ -126,6 +141,7 @@ def _save_resume_state(
         "scheduler": scheduler.state_dict(),
         "step": step,
         "losses": losses,
+        "loss_components": components or {},
         "rng": {
             "cpu": torch.get_rng_state(),
             "gen": generator.get_state(),
@@ -142,6 +158,21 @@ def _save_resume_state(
     torch.save(state, path)
 
 
+def _save_histories(
+    out_dir: Path, losses: list[float], components: dict[str, list[float]]
+) -> None:
+    """Write ``loss.json`` (the totals, unchanged) plus per-term histories.
+
+    ``loss.json`` stays a flat list of floats: the exporter's curve and every
+    existing tool read it. The terms go beside it, because "the total went down"
+    cannot say whether the perceptual terms pulled their weight or fought the
+    pixel error.
+    """
+    (out_dir / "loss.json").write_text(json.dumps(losses))
+    if components:
+        (out_dir / "loss_components.json").write_text(json.dumps(components, indent=1))
+
+
 def train(
     ca: NeuralCA,
     target: torch.Tensor,
@@ -150,10 +181,53 @@ def train(
     device: torch.device,
     out_dir: Path,
     resume: str | Path | None = None,
+    provenance: dict | None = None,
 ) -> list[float]:
-    """Train ``ca`` in place and return the loss history."""
+    """Train ``ca`` in place and return the loss history.
+
+    ``provenance`` is free-form metadata recorded next to the run (``train.json``)
+    -- the CLI passes the target spec(s) / experiment name so a run directory is
+    self-describing without having to read the shell history.
+    """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    # A resume has to be validated *before* the run directory is rewritten: if the
+    # checkpoint does not fit the module we just built, `load_state_dict` raises,
+    # and a spec.json written earlier would then describe a model that no
+    # checkpoint in the directory matches (`ModelSpec.from_run_dir` refuses that,
+    # but not writing the lie in the first place is better).
+    resume_state: dict | None = None
+    if resume is not None:
+        resume_state = torch.load(resume, map_location="cpu")
+        if "model" not in resume_state:
+            # `ckpt_*.pt` is a bare state dict; only `state.pt` carries the optimizer
+            # and RNG, which is what resuming needs.
+            raise ValueError(
+                f"{resume} is a bare checkpoint (no optimizer/RNG state); "
+                f"--resume needs the run's state.pt"
+            )
+        ca.load_state_dict(resume_state["model"])
+
+    # Record what this run *is* before any training happens, so a crashed or
+    # still-running job is already loadable by `nca.sample --run <dir>` and
+    # re-exportable without the caller remembering the flags.
+    spec = ca.spec
+    spec.save(out_dir / "spec.json")
+    (out_dir / "train.json").write_text(
+        json.dumps(
+            {
+                **(provenance or {}),
+                "config": asdict(cfg),
+                "spec": asdict(spec),
+                "device": str(device),
+                "torch_version": torch.__version__,
+                "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
     random.seed(cfg.seed)
     np.random.seed(cfg.seed)
@@ -170,28 +244,18 @@ def train(
 
     ca.to(device)
 
-    # The unroll is ~80 sequential steps, so the per-call dispatch overhead
-    # dominates. Compiling the *whole sequence* (not just the module) turns it
-    # into one graph. The loop bound comes from the mask tensor, so this is
-    # specialised per unroll length.
-    if cfg.compile:
-
-        @torch.compile(dynamic=False)
-        def forward(
-            x: torch.Tensor, masks: torch.Tensor, cond: torch.Tensor | None
-        ) -> torch.Tensor:
-            for k in range(masks.shape[0]):
-                x = ca(x, update_mask=masks[k], cond=cond)
-            return x
-
-    else:
-
-        def forward(
-            x: torch.Tensor, masks: torch.Tensor, cond: torch.Tensor | None
-        ) -> torch.Tensor:
-            for k in range(masks.shape[0]):
-                x = ca(x, update_mask=masks[k], cond=cond)
-            return x
+    # The unroll is ~80 sequential steps but it is throughput-bound, not
+    # latency-bound: time is linear in batch size, so there is nothing to fuse
+    # away. `torch.compile` measured neutral-to-slower here (compiling the whole
+    # sequence pays a warmup and is specialised per unroll length) - see
+    # docs/findings/training-perf.md. `scripts/profile_train.py --cuda-graphs`
+    # re-measures it if the assumption ever needs revisiting.
+    def forward(
+        x: torch.Tensor, masks: torch.Tensor, cond: torch.Tensor | None
+    ) -> torch.Tensor:
+        for k in range(masks.shape[0]):
+            x = ca(x, update_mask=masks[k], cond=cond)
+        return x
     target = target.to(device)
     seed = seed.to(device)
     _, h, w = seed.shape
@@ -204,6 +268,10 @@ def train(
         raise ValueError(
             f"model built with cond_n={ca.cond_n} but {n_targets} target(s) given"
         )
+
+    # `None` keeps the exact pixel-only path (and `loss_fn`) for every run that
+    # does not ask for more; the extra terms are additive on top of it.
+    criterion = Loss(cfg.loss) if cfg.loss else None
 
     optimizer = torch.optim.Adam(ca.parameters(), lr=cfg.lr)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(
@@ -231,14 +299,17 @@ def train(
         print("note: noise_n > 0 but noise_std is 0; no noise will be applied")
 
     losses: list[float] = []
+    component_history: dict[str, list[float]] = {}
     start_step = 0
-    if resume is not None:
-        state = torch.load(resume, map_location="cpu")
-        ca.load_state_dict(state["model"])
+    if resume_state is not None:
+        state = resume_state
         optimizer.load_state_dict(state["optimizer"])
         scheduler.load_state_dict(state["scheduler"])
         start_step = int(state.get("step", 0))
         losses = list(state.get("losses", []))
+        component_history = {
+            k: list(v) for k, v in (state.get("loss_components") or {}).items()
+        }
         rng = state.get("rng", {})
         if "cpu" in rng:
             torch.set_rng_state(rng["cpu"])
@@ -267,11 +338,18 @@ def train(
     # Loss values stay as device scalars and are only turned into floats when a
     # log line / checkpoint actually needs them (no per-step sync).
     pending: list[torch.Tensor] = []
+    pending_parts: list[dict[str, float]] = []
 
     def flush_losses() -> None:
         if pending:
             losses.extend(torch.stack(pending).tolist())
             pending.clear()
+        if pending_parts:
+            for key in sorted({k for p in pending_parts for k in p}):
+                component_history.setdefault(key, []).extend(
+                    p.get(key, float("nan")) for p in pending_parts
+                )
+            pending_parts.clear()
 
     for step in range(start_step, cfg.iterations):
         tgt = target
@@ -279,6 +357,12 @@ def train(
             idx, x0, cond = pool.sample(cfg.batch_size, generator)
             if cond is not None:
                 tgt = target[cond.argmax(dim=1)]
+            else:
+                # Non-conditional run: every slot wants the same target. Expand it
+                # to a per-sample tensor so the ranking / mismatch code below can
+                # index it (tgt[rank]) -- relying on broadcast silently breaks the
+                # moment batch_size > 1.
+                tgt = target.expand(cfg.batch_size, *target.shape[1:])
             with torch.no_grad():
                 rank = per_sample_loss(x0, tgt).argsort(descending=True)
             x0 = x0[rank]
@@ -345,13 +429,37 @@ def train(
             <= ca.fire_rate
         )
 
-        x, loss_t = _train_step(ca, forward, optimizer, x0, tgt, cfg, masks, cond)
+        if criterion is not None and not criterion.calibrated:
+            # Balance the terms against the pixel error *of this run's own states*
+            # (a bold emoji and a faint texture need different raw scales), and
+            # record what the weights ended up meaning.
+            scales = criterion.calibrate(x0, tgt)
+            if scales:
+                note = {k: round(v, 6) for k, v in scales.items()}
+                print(f"loss calibration (pixel/term): {note}", flush=True)
+                (out_dir / "loss_calibration.json").write_text(json.dumps(note, indent=2))
+            criterion.calibrated = True
+
+        x, loss_t, parts = _train_step(
+            ca,
+            forward,
+            optimizer,
+            x0,
+            tgt,
+            cfg,
+            masks,
+            cond,
+            criterion=criterion,
+            progress=step / max(cfg.iterations - 1, 1),
+        )
         scheduler.step()
 
         if pool is not None:
             pool.commit(idx, x, cond)
 
         pending.append(loss_t)
+        if parts:
+            pending_parts.append(parts)
 
         if step % cfg.log_every == 0 or step == cfg.iterations - 1:
             flush_losses()
@@ -360,10 +468,14 @@ def train(
             done = step + 1 - start_step
             rate = done / elapsed if elapsed > 0 else 0.0
             eta = (cfg.iterations - step - 1) / rate if rate > 0 else float("inf")
+            detail = ""
+            if component_history:
+                last = {k: v[-1] for k, v in component_history.items() if v}
+                detail = " | " + " ".join(f"{k} {v:.4f}" for k, v in sorted(last.items()))
             print(
                 f"step {step + 1:6d}/{cfg.iterations} | loss {loss:.6f} "
                 f"| log10 {np.log10(max(loss, 1e-12)):+.3f} "
-                f"| {rate:.2f} it/s | eta {eta / 60:.1f} min",
+                f"| {rate:.2f} it/s | eta {eta / 60:.1f} min{detail}",
                 flush=True,
             )
 
@@ -383,16 +495,18 @@ def train(
             _save_resume_state(
                 out_dir / "state.pt", ca, optimizer, scheduler, generator,
                 gpu_generator, device, step + 1, losses, pool, cfg.save_pool,
+                components=component_history,
             )
-            (out_dir / "loss.json").write_text(json.dumps(losses))
+            _save_histories(out_dir, losses, component_history)
 
     torch.save(ca.state_dict(), out_dir / "ckpt_final.pt")
     flush_losses()
     _save_resume_state(
         out_dir / "state.pt", ca, optimizer, scheduler, generator,
         gpu_generator, device, cfg.iterations, losses, pool, cfg.save_pool,
+        components=component_history,
     )
-    (out_dir / "loss.json").write_text(json.dumps(losses))
+    _save_histories(out_dir, losses, component_history)
     plot_loss(losses, out_dir / "loss.png")
 
     if cfg.make_gif:

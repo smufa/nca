@@ -17,6 +17,8 @@ import numpy as np
 import torch
 from PIL import Image, ImageDraw
 
+from . import step
+
 try:  # NixOS and some distros do not expose a CA bundle to Python by default
     import certifi
 
@@ -219,7 +221,9 @@ def prepare_targets(
 
 
 def make_seed(height: int, width: int, channel_n: int = 16) -> torch.Tensor:
-    """A single seed cell in the middle with RGB=0 and all other channels=1."""
-    seed = torch.zeros(channel_n, height, width)
-    seed[3:, height // 2, width // 2] = 1.0
-    return seed
+    """A single seed cell in the middle with RGB=0 and all other channels=1.
+
+    The definition (which channels, which cell) lives in `nca.step.make_seed`, so
+    the frontend and the GPU bench seed a run exactly like training does.
+    """
+    return torch.from_numpy(step.make_seed(channel_n, height, width))

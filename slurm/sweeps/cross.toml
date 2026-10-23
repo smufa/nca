@@ -1,0 +1,72 @@
+# Cross-target: the multi-target runs, but a slice of every batch is asked to
+# convert an already-grown emoji into a *different* one (mismatch_p).
+#
+# Rationale: with self-consistent (state, cond) pairs a small MLP can satisfy the
+# task by memorising N attractors and treating the one-hot as an index. Breaking
+# the pairing forces the conditioning to steer the dynamics. `mismatch_p` is
+# recorded in meta.json's train block (the id encodes only the task).
+#
+# Same target lists and order as multi.toml, so `multi4.matched` and
+# `cross4.mismatch` are comparable.
+
+[sweep]
+name = "crosstarget"
+group = "crosstarget"
+
+[resources]
+partition = "mig-priority"
+constraint = "mig"
+gres = "gpu:1g.10gb:1"
+time = "02:00:00"
+mem = "16G"
+cpus = 4
+
+[defaults]
+regime = "regenerating"
+mismatch_p = 0.3
+target_size = 40
+padding = 16
+batch_size = 16
+iterations = 8000
+unroll = [64, 96]
+log_every = 25
+ckpt_every = 500
+
+[[run]]
+name = "cross2.mismatch"
+targets = ["emoji:1f980", "emoji:1f419"]
+
+[[run]]
+name = "cross4.mismatch"
+targets = ["emoji:1f980", "emoji:1f419", "emoji:1f996", "emoji:1f422"]
+
+[[run]]
+name = "cross6.mismatch"
+targets = [
+  "emoji:1f980", "emoji:1f419", "emoji:1f996",
+  "emoji:1f422", "emoji:1f335", "emoji:1f344",
+]
+
+[[run]]
+name = "cross8.mismatch"
+targets = [
+  "emoji:1f980", "emoji:1f419", "emoji:1f996", "emoji:1f422",
+  "emoji:1f335", "emoji:1f344", "emoji:1f41d", "emoji:1f9a9",
+]
+
+# Capacity variants of the hardest case: does the 8-way task just need more MLP?
+[[run]]
+name = "cross8.mismatch.h=256"
+hidden = 256
+targets = [
+  "emoji:1f980", "emoji:1f419", "emoji:1f996", "emoji:1f422",
+  "emoji:1f335", "emoji:1f344", "emoji:1f41d", "emoji:1f9a9",
+]
+
+[[run]]
+name = "cross8.mismatch.l=2"
+hidden_layers = 2
+targets = [
+  "emoji:1f980", "emoji:1f419", "emoji:1f996", "emoji:1f422",
+  "emoji:1f335", "emoji:1f344", "emoji:1f41d", "emoji:1f9a9",
+]

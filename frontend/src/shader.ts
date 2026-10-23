@@ -2,30 +2,48 @@
  * A native WebGPU (WGSL) implementation of one CA step.
  *
  * ORT-Web costs ~1-12 ms *per graph node* (each node is a separate dispatch), and
- * our step has ~19 nodes. This engine does the whole step in **two** compute
- * passes with no WASM bridge:
+ * our step has ~19 nodes. This engine does the whole step in compute passes with no
+ * WASM bridge:
  *
- *   1. perception (depthwise 3x3, wrap) + update-rule MLP + fire/step -> `tmp`
- *   2. living-cell mask (pre & post) -> the other state buffer
+ *   plain (LH=1 or a deep model):
+ *     1. perception (depthwise 3x3, wrap) + update-rule MLP + fire/step -> `tmp`
+ *   work-skip (LH=1 only, the common case):
+ *     1a. copy the state, append every firing cell to a work list  (`compact`)
+ *     1b. list length -> indirect dispatch args                     (`finalize`)
+ *     1c. perception + MLP for the listed cells only                (`step_list`)
+ *   both:
+ *     2. living-cell mask (pre & post) -> the other state buffer     (`pass2`)
+ *
+ * Work-skip exists because `fire_rate 0.5` means half the grid is multiplied by
+ * zero *after* the MLP has run: at 256² it is 1.67x faster, bit-identical to the
+ * plain path (same maths, same order). `?ws=0` forces the plain path so the two
+ * can be compared in the browser.
  *
  * The shaders live in `wgsl/*.wgsl` so the same source is used by the headless
- * test harness in `scripts/shader_bench.py`. The MLP weights come from
- * `weights.bin` (exported alongside the ONNX model).
+ * test harness in `scripts/shader_bench.py` and `scripts/work_skip_bench.py`. The
+ * MLP weights come from `weights.bin` (exported alongside the ONNX model).
  */
 
 import type { ManifestModel } from './models';
 import { CANONICAL_KERNELS, modelKernels, mulberry32, seedState } from './nca';
 import type { Rng } from './nca';
-import type { BrushOp, CaEngine, Perf } from './engine';
+import type { BrushOp, CaEngine, Capabilities, Perf, Support } from './engine';
+import { checkSpec } from './engine';
 import type { ChannelMapping } from './nca';
 
 import PASS1 from './wgsl/pass1.wgsl?raw';
 import PASS2 from './wgsl/pass2.wgsl?raw';
+import COMPACT from './wgsl/compact.wgsl?raw';
+import FINALIZE from './wgsl/finalize.wgsl?raw';
+import STEP_LIST from './wgsl/step_list.wgsl?raw';
 import DRAW_WGSL from './wgsl/draw.wgsl?raw';
 import BRUSH_WGSL from './wgsl/brush.wgsl?raw';
 
 const WG = 8;
 const STORAGE = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST;
+/** `?ws=0` disables work-skipping for a side-by-side comparison. */
+const WORK_SKIP_ENABLED =
+  typeof location === 'undefined' || new URLSearchParams(location.search).get('ws') !== '0';
 
 interface GpuViewRes {
   context: GPUCanvasContext;
@@ -71,6 +89,11 @@ export class ShaderRunner implements CaEngine {
 
   private pipeline1!: GPUComputePipeline;
   private pipeline2!: GPUComputePipeline;
+  /** Work-skip passes; undefined when the model needs the plain path. */
+  private pipelineCompact?: GPUComputePipeline;
+  private pipelineFinalize?: GPUComputePipeline;
+  private pipelineStepList?: GPUComputePipeline;
+  private workSkip = false;
   private brushPipeline!: GPUComputePipeline;
   private brushUniform!: GPUBuffer;
   private brushBindGroups!: [GPUBindGroup, GPUBindGroup];
@@ -78,6 +101,13 @@ export class ShaderRunner implements CaEngine {
   private gpuViews = new Map<HTMLCanvasElement, GpuViewRes>();
   private bg1!: [GPUBindGroup, GPUBindGroup];
   private bg2!: [GPUBindGroup, GPUBindGroup];
+  private bgCompact?: [GPUBindGroup, GPUBindGroup];
+  private bgStepList?: [GPUBindGroup, GPUBindGroup];
+  private bgFinalize?: GPUBindGroup;
+  /** Work list (one u32 per cell) + its length + the indirect dispatch args. */
+  private listBuf!: GPUBuffer;
+  private countBuf!: GPUBuffer;
+  private indirectBuf!: GPUBuffer;
 
   private cur = 0;
   private stateBytes = 0;
@@ -120,8 +150,9 @@ export class ShaderRunner implements CaEngine {
   }
 
   static async create(model: ManifestModel, seed = 1): Promise<ShaderRunner> {
-    if (!ShaderRunner.supports(model)) {
-      throw new Error('shader engine unsupported for this model size');
+    const support = ShaderRunner.supports(model);
+    if (!support.ok) {
+      throw new Error(`shader engine cannot run this model: ${support.reason}`);
     }
     const adapter = await navigator.gpu.requestAdapter({
       powerPreference: 'high-performance',
@@ -145,15 +176,37 @@ export class ShaderRunner implements CaEngine {
   }
 
   /**
-   * Limits of the WGSL step: perc is `array<f32, 64>` (3*16 + 16), perc4 is
-   * `array<vec4<f32>, 16>`, and the hidden vector is `array<vec4<f32>, HMAX=64>`
-   * because WGSL array sizes cannot be pipeline overrides.
+   * Limits of the WGSL step, each traceable to a declaration in `wgsl/pass1.wgsl`:
+   * `perc` is `array<f32, 64>` and `perc4` is `array<vec4<f32>, 16>`, so
+   * `3C + CONDN <= 64`; the hidden vector is `array<vec4<f32>, HMAX=64>` because
+   * WGSL array sizes cannot be pipeline overrides, so `hidden/4 <= 64`; `LH` only
+   * has offsets for one hidden->hidden block in `weights.bin`, so 2 layers.
+   *
+   * Grid: three storage buffers of `C*H*W*4` bytes must fit the default
+   * `maxStorageBufferBindingSize` (128 MiB), which is a *pixel* budget here --
+   * with C=16 that is ~700k pixels, i.e. up to 836x836.
    */
-  static supports(model: ManifestModel): boolean {
-    const C = model.meta.channel_n;
-    const h = model.meta.weights.hidden_n;
-    const condN = model.meta.cond_n ?? 0;
-    return C >= 4 && C <= 16 && h > 0 && h % 4 === 0 && h / 4 <= 64 && condN <= 16;
+  static readonly CAPABILITIES: Capabilities = {
+    kind: 'shader',
+    label: 'WebGPU shader',
+    cond: true,
+    gpuBrush: true,
+    gpuRender: true,
+    workSkip: true,
+    maxC: 16,
+    maxHidden: 256,
+    maxLayers: 2,
+    maxCond: 16,
+    maxPerc: 64,
+    maxGridPx: Math.floor((128 * 1024 * 1024) / (3 * 16 * 4)),
+  };
+
+  static supports(model: ManifestModel): Support {
+    return checkSpec(ShaderRunner.CAPABILITIES, model.meta);
+  }
+
+  get capabilities(): Capabilities {
+    return { ...ShaderRunner.CAPABILITIES, workSkip: this.workSkip };
   }
 
   get mode(): string {
@@ -184,11 +237,16 @@ export class ShaderRunner implements CaEngine {
       CONDN: this.condN,
       LH: this.layers,
     };
+    // `pose.wgsl` / `pass2.wgsl` have a single `main`; `pass1.wgsl` splits the
+    // shallow and deep update rules into two entry points so neither pays for the
+    // other's registers.
+    const isStep = src.includes('fn step_deep');
+    const entryPoint = isStep ? ((this.meta.hidden_layers ?? 1) > 1 ? 'step_deep' : 'step') : 'main';
     this.pipeline1 = d.createComputePipeline({
       layout: 'auto',
       compute: {
         module: d.createShaderModule({ code: src }),
-        entryPoint: 'main',
+        entryPoint,
         constants,
       },
     });
@@ -199,6 +257,52 @@ export class ShaderRunner implements CaEngine {
         entryPoint: 'main',
         constants: { C },
       },
+    });
+
+    // Work-skipping needs the shallow rule only: `step_list.wgsl` is `pass1.wgsl`'s
+    // `step` entry with the cell index taken from a work list. Deep models keep the
+    // plain path (their rule has no list entry point).
+    if (WORK_SKIP_ENABLED && this.layers === 1) {
+      try {
+        this.pipelineCompact = d.createComputePipeline({
+          layout: 'auto',
+          compute: {
+            module: d.createShaderModule({ code: COMPACT }),
+            entryPoint: 'main',
+            constants: { C },
+          },
+        });
+        this.pipelineFinalize = d.createComputePipeline({
+          layout: 'auto',
+          compute: { module: d.createShaderModule({ code: FINALIZE }), entryPoint: 'main' },
+        });
+        this.pipelineStepList = d.createComputePipeline({
+          layout: 'auto',
+          compute: {
+            module: d.createShaderModule({ code: STEP_LIST }),
+            entryPoint: 'main',
+            constants: { C, NP4: p4, W1S4: p4, HG: hg, CONDN: this.condN },
+          },
+        });
+        this.workSkip = true;
+      } catch (err) {
+        // A driver without indirect dispatch or storage atomics: the plain path is
+        // the fallback, and it is the same maths, so this is not a correctness risk.
+        console.warn('work-skip pipeline unavailable, using the plain step:', err);
+        this.workSkip = false;
+      }
+    }
+    // Grid-independent: the work-list length and the indirect dispatch args.
+    this.countBuf = d.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC,
+    });
+    this.indirectBuf = d.createBuffer({
+      size: 16,
+      usage:
+        GPUBufferUsage.STORAGE |
+        GPUBufferUsage.INDIRECT |
+        GPUBufferUsage.COPY_DST,
     });
     this.brushPipeline = d.createComputePipeline({
       layout: 'auto',
@@ -247,7 +351,7 @@ export class ShaderRunner implements CaEngine {
     const { channelN: C, grid: H } = this;
     const W = H;
     this.stateBytes = C * H * W * 4;
-    for (const b of [this.stateA, this.stateB, this.tmpBuf, this.fireBuf, this.staging]) {
+    for (const b of [this.stateA, this.stateB, this.tmpBuf, this.fireBuf, this.listBuf, this.staging]) {
       b?.destroy();
     }
     const size = Math.ceil(this.stateBytes / 16) * 16;
@@ -258,6 +362,11 @@ export class ShaderRunner implements CaEngine {
     this.fireBuf = d.createBuffer({
       size: Math.ceil((H * W * 4) / 16) * 16,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+    });
+    // One u32 per cell: the firing cells' linear indices, in atomic-append order.
+    this.listBuf = d.createBuffer({
+      size: Math.max(Math.ceil((H * W * 4) / 16) * 16, 16),
+      usage: GPUBufferUsage.STORAGE,
     });
     this.staging = d.createBuffer({
       size,
@@ -293,6 +402,47 @@ export class ShaderRunner implements CaEngine {
     // index 0: cur = A, 1: cur = B
     this.bg1 = [bg1(this.stateA), bg1(this.stateB)];
     this.bg2 = [bg2(this.stateA, this.stateB), bg2(this.stateB, this.stateA)];
+
+    if (this.workSkip && this.pipelineCompact && this.pipelineStepList && this.pipelineFinalize) {
+      const lc = this.pipelineCompact.getBindGroupLayout(0);
+      const lm = this.pipelineStepList.getBindGroupLayout(0);
+      const bgCompact = (state: GPUBuffer): GPUBindGroup =>
+        d.createBindGroup({
+          layout: lc,
+          entries: [
+            { binding: 0, resource: { buffer: state } },
+            { binding: 1, resource: { buffer: this.fireBuf } },
+            { binding: 2, resource: { buffer: this.tmpBuf } },
+            { binding: 3, resource: { buffer: this.listBuf } },
+            { binding: 4, resource: { buffer: this.countBuf } },
+            { binding: 5, resource: { buffer: this.paramsBuf } },
+          ],
+        });
+      const bgStepList = (state: GPUBuffer): GPUBindGroup =>
+        d.createBindGroup({
+          layout: lm,
+          entries: [
+            { binding: 0, resource: { buffer: state } },
+            { binding: 1, resource: { buffer: this.listBuf } },
+            { binding: 2, resource: { buffer: this.weightBuf } },
+            { binding: 3, resource: { buffer: this.kernelBuf } },
+            { binding: 4, resource: { buffer: this.tmpBuf } },
+            { binding: 5, resource: { buffer: this.paramsBuf } },
+            { binding: 6, resource: { buffer: this.weight4Buf } },
+            { binding: 7, resource: { buffer: this.condBuf } },
+            { binding: 8, resource: { buffer: this.countBuf } },
+          ],
+        });
+      this.bgCompact = [bgCompact(this.stateA), bgCompact(this.stateB)];
+      this.bgStepList = [bgStepList(this.stateA), bgStepList(this.stateB)];
+      this.bgFinalize = d.createBindGroup({
+        layout: this.pipelineFinalize.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this.countBuf } },
+          { binding: 1, resource: { buffer: this.indirectBuf } },
+        ],
+      });
+    }
 
     const bl = this.brushPipeline.getBindGroupLayout(0);
     const bgBrush = (state: GPUBuffer): GPUBindGroup =>
@@ -393,11 +543,32 @@ export class ShaderRunner implements CaEngine {
     this.stepping = true;
     try {
       const enc = this.device.createCommandEncoder();
-      const pass1 = enc.beginComputePass();
-      pass1.setPipeline(this.pipeline1);
-      pass1.setBindGroup(0, this.bg1[this.cur]);
-      pass1.dispatchWorkgroups(Math.ceil(H / WG), Math.ceil(H / WG));
-      pass1.end();
+      const dispatch = Math.ceil(H / WG);
+      if (this.workSkip && this.bgCompact && this.bgStepList && this.bgFinalize) {
+        // The counter is the only per-step reset: 4 bytes, ordered before the passes.
+        this.device.queue.writeBuffer(this.countBuf, 0, new Uint32Array([0]));
+        const compact = enc.beginComputePass();
+        compact.setPipeline(this.pipelineCompact!);
+        compact.setBindGroup(0, this.bgCompact[this.cur]);
+        compact.dispatchWorkgroups(dispatch, dispatch);
+        compact.end();
+        const finalize = enc.beginComputePass();
+        finalize.setPipeline(this.pipelineFinalize!);
+        finalize.setBindGroup(0, this.bgFinalize);
+        finalize.dispatchWorkgroups(1, 1, 1);
+        finalize.end();
+        const mlp = enc.beginComputePass();
+        mlp.setPipeline(this.pipelineStepList!);
+        mlp.setBindGroup(0, this.bgStepList[this.cur]);
+        mlp.dispatchWorkgroupsIndirect(this.indirectBuf, 0);
+        mlp.end();
+      } else {
+        const pass1 = enc.beginComputePass();
+        pass1.setPipeline(this.pipeline1);
+        pass1.setBindGroup(0, this.bg1[this.cur]);
+        pass1.dispatchWorkgroups(dispatch, dispatch);
+        pass1.end();
+      }
       const pass2 = enc.beginComputePass();
       pass2.setPipeline(this.pipeline2);
       pass2.setBindGroup(0, this.bg2[this.cur]);

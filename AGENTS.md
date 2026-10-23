@@ -1,336 +1,177 @@
 # AGENTS.md — orientation for coding agents
 
-Read this first. It is the map of the repo, the non-obvious invariants, and the
-commands you'll actually need. Deeper detail lives in `README.md` (training +
-model), `PLAN.md` (ONNX/frontend design), `TRAINING.md` (cluster).
+Read this first: the map, the invariants, the commands. Measurements and their
+reasoning live in [`docs/findings/`](docs/findings/README.md) — not repeated here.
+Other docs: `README.md` (usage), `PLAN.md` (ONNX/frontend design), `TRAINING.md`
+(cluster), `docs/HOUSEKEEPING.md` (refactor plan + known drift).
 
 ## What this is
 
 A from-scratch PyTorch reimplementation of **Growing Neural Cellular Automata**
-(Mordvintsev et al., Distill 2020) with three parts:
-
-1. **`nca/`** — the 16-channel CA, training (sample pool + damage), ONNX export.
-2. **`frontend/`** — Vite + TypeScript playground that runs a trained CA live.
-3. **`slurm/`** — training on the ARNES HPC cluster (H100s).
-
-The whole point of the architecture is that **one trained model = a single
-`step(x) -> x'` function**, everything else is plumbing around it.
+(Mordvintsev et al., Distill 2020): `nca/` (the CA, training, ONNX export),
+`frontend/` (Vite + TS playground running a trained CA live) and `slurm/`
+(training on the ARNES H100s). The architecture is one idea: **one trained model =
+a single `step(x) -> x'` function**, everything else is plumbing around it.
 
 ## Core invariants (do not break these)
 
 - **State layout is channels-first `[B, C, H, W]`** everywhere (PyTorch, ONNX,
   WGSL, JS). `C = 16`: channels `0:3` = RGB, `3` = alpha, `4:16` = hidden.
-- **RGB is premultiplied by alpha**; rendering composites `out = rgb + (1-a)*bg`
-  over white (`bg=1`) or black (`bg=0`). `nca/nca.ts:mapChannels` is the
-  reference; `frontend/src/wgsl/draw.wgsl` mirrors it on the GPU.
-- **Boundaries are periodic (toroidal).** Implemented as a single ONNX
-  `Pad(mode="wrap")` (opset 19) / `F.pad(mode="circular")`. `--no-wrap` restores
-  the paper's zero padding but is not used by default.
-- **The perception kernel is a model *input*, not a constant.** This is what
-  makes the kernel lab (rotation, editable Sobel) possible without re-export.
-- **Training and inference must agree.** Any change to `nca/model.py` changes the
-  graph; always re-export and check `--verify` parity.
+- **RGB is premultiplied by alpha**: rendering composites `out = rgb + (1-a)*bg`.
+  `nca.ts:mapChannels` is the reference, `frontend/src/wgsl/draw.wgsl` mirrors it.
+- **Boundaries are periodic (toroidal)**: one ONNX `Pad(mode="wrap")` (opset 19) /
+  `F.pad(mode="circular")`; `--no-wrap` restores the paper's zero padding.
+- **The perception kernel is a model *input*, not a constant** — that is what makes
+  the kernel lab (rotation, editable Sobel) possible without re-export.
+- **Training and inference must agree**: any change to `nca/model.py` changes the
+  graph, so re-export and read the parity line (`--no-verify` skips it).
+- **Read a model's shape from `nca/spec.py`, never re-derive it.** `ModelSpec` is
+  the one source of truth for `C` / hidden / hidden_layers / `cond_n` / boundaries,
+  and `tests/test_spec.py` + `scripts/check_meta.py` prove every committed export
+  agrees with it (`tests/test_export.py` repacks each `model.onnx` into
+  `weights.bin` and diffs it). `update[0]`'s fan-in is `3C + cond_n`; deriving `C`
+  from it is wrong (that bug lived in `nca/sample.py`).
+- **Read the step's *constants* from `nca/step.py`, never re-type them.** Perception
+  basis, depthwise weight, seed cell and channel->pixel mapping are shared by torch,
+  numpy (`scripts/shader_bench.py`), WGSL and `frontend/src/nca.ts`; `nca/step.py`
+  may not import torch, and `tests/test_step.py` fails when `nca.ts` drifts.
 
 ## Repo layout
 
 ```
+nca/spec.py         ModelSpec: the shape of a model (channels, hidden, hidden_layers, cond_n)
+nca/step.py         torch-free primitives: perception kernels/weight, seed, channel->pixel
 nca/model.py        NeuralCA (perception, update rule, fire + living masks)
+nca/experiments.py  Experiment + REGIMES: every training default, in one place
+nca/sweep.py        `python -m nca.sweep <toml>`: render one sbatch call per run
 nca/train.py        training loop (sample pool, damage + noise, grad normalisation, resume)
+nca/losses.py       loss terms: pixel MSE + optional laplacian / ssim / edge (calibrated)
 nca/targets.py      target images: emoji / image file / procedural shapes
-nca/export.py       export a checkpoint to ONNX + parity check + weights.bin
+nca/export/         export: graph.py (ONNX), verify.py (parity), weights.py, manifest.py, cli.py
 nca/cli.py          `python main.py` entry point (train)
 nca/sample.py       load a checkpoint, grow / regenerate (standalone)
 nca/viz.py          rendering, tiling, gifs, loss plots
 
 frontend/src/
-  engine.ts         CaEngine interface shared by the two web backends
-  runner.ts         CaRunner: onnxruntime-web WASM backend (CPU compatibility path)
-  shader.ts         ShaderRunner: native WGSL backend (2 compute passes)
-  wgsl/*.wgsl       the actual shaders (shared with the Python bench)
+  engine.ts         CaEngine + Capabilities: the interface both backends implement
+  runner.ts         CaRunner (onnxruntime-web WASM) · shader.ts ShaderRunner (WGSL)
+  wgsl/*.wgsl       the shaders, shared with the Python bench
   nca.ts            pure helpers: perception kernels, seed, channel mapping
-  main.ts           UI: views, brush, kernel lab, engine/grid switches
-  models.ts         manifest + meta types + picker grouping (modelGroup)
+  main.ts           entry point: 23 lines of wiring
+  ui/app.ts         shared UI state + busy/whenIdle + status/perf
+  ui/dom.ts         one `el()` lookup per element (throws if index.html drifts)
+  ui/views.ts       canvas panels + ChannelMapping
+  ui/channels.ts    the per-view channel selects
+  ui/brush.ts       brush strokes (GPU brush or edit())
+  ui/kernels.ts     kernel lab (rotate / edit)
+  ui/cond.ts        conditioning sliders
+  ui/picker.ts      manifest -> grouped options -> session swap
+  ui/info.ts        the model-information panel
+  ui/loop.ts        frame loop + transport controls
+  ui/console.ts     `window.nca` helpers
+  models.ts         manifest + meta types + picker grouping
 
 scripts/shader_bench.py   headless GPU correctness/benchmark harness (wgpu-py)
-scripts/variants/*.wgsl   shader experiments (see "Shader performance")
-slurm/                    cluster submission
+scripts/check_meta.py     validate exports/*/meta.json against ModelSpec (--fix repairs)
+scripts/variants/*.wgsl   shader experiments (see docs/findings/shader-perf.md)
+scripts/loss_ab.py        A/B a loss vector on one target, scored on held-out metrics
+tests/                    pytest: spec/weights, exporter, meta, experiments, training smoke
+slurm/train.sbatch        one job (sources .venv, unsets PYTHONPATH, pins --constraint=h100)
+slurm/submit_sweep.sh     render a study's jobs: `bash … slurm/sweeps/<study>.toml`
+slurm/sweeps/*.toml       the studies: emoji-sweep, capacity, multi, cross, experiments, demo
 exports/                  exported models, committed (small); served to the UI
+flake.nix                 `nix run .#playground` + a NixOS module (docs/DEPLOY.md)
 assets/targets/           cached emoji PNGs (offline training)
 ```
 
 ## ONNX graph interface
 
-```
-Inputs
-  x                 float32 [B, C, H, W]
-  perception_weight float32 [3C, 1, 3, 3]   # identity, dx, dy per channel
-  fire_mask         float32 [B, 1, H, W]    # stochastic update (0/1)
-  step_size         float32 []
-Output
-  x_next            float32 [B, C, H, W]
-```
-
-Ops: `Pad(wrap)`, `Conv`, `MaxPool`, `Relu`, `Mul`, `Add`, `Greater`, `And`,
-`Cast`, `Slice` — ~19 nodes. `nca/export.py` also writes `weights.bin` (the MLP
-as flat f32: `W1[128,48]`, `b1[128]`, `W2[16,128]`, `b2[16]`) for the WGSL engine.
+`x[B,C,H,W]`, `perception_weight[3C,1,3,3]`, `fire_mask[B,1,H,W]`, `step_size[]`,
+optional `cond[B,cond_n,1,1]` → `x_next[B,C,H,W]`; ~19 nodes (`Pad(wrap)`, `Conv`,
+`MaxPool`, `Relu`, `Mul`, `Add`, `Greater`, `And`, `Cast`, `Slice`). `export.py` also
+writes `weights.bin` (offsets: `ModelSpec.weight_offsets()`). Design: `PLAN.md`.
 
 ## Commands
 
 ```bash
 uv sync --group dev                     # Python env (CPU torch)
-uv run python main.py --target shape:heart --iterations 300   # train
+uv run python main.py --target shape:heart --iterations 300        # train
+uv run python main.py --config slurm/sweeps/demo.toml --device cpu # a study's run, locally
+uv run python main.py --config slurm/sweeps/capacity.toml \
+    --run crab.regenerating.c=8.h=128 --set lr=1e-3                # file < flags < --set
 uv run python -m nca.export --checkpoint runs/.../ckpt_final.pt \
-    --id NAME --experiment regenerating --target "emoji:1f980" --verify
-uv run python -m nca.sample --checkpoint runs/.../ckpt_final.pt --steps 300
+    --id NAME --target "emoji:1f980"                             # verifies parity
+uv run python -m nca.export --all            # re-export every model (falls back to
+the export itself when its run is gone)
+uv run python -m nca.export --all --rebuild  # ignore the checkpoints, rebuild from
+exports/<id>/{meta.json,weights.bin}
+uv run python -m nca.export --checkpoint exports/crab.regenerating --rebuild  # one model
+uv run python -m nca.export --reindex        # rebuild manifest.json from exports/*/meta.json
+uv run python -m nca.export --reindex --refresh-targets  # also re-render target.png/npy
+uv run python -m nca.sample --run runs/NAME --steps 300         # shape from spec.json
+uv run python -m nca.sample --run runs/cross8.mismatch --cond 3 # conditional model, target 3
+uv run python -m nca.sweep slurm/sweeps/cross.toml --dry-run    # what would sbatch
+uv run python -m pytest -q tests              # the suite (CPU, seconds)
+uv run python -m scripts.check_meta           # exports/*/meta.json vs nca/spec.py
+uv run python main.py --target shape:heart --loss laplacian=0.5 --loss ssim=0.1 \
+    --loss edge=0.05 --loss start=0.2          # perceptual terms (see docs/findings/losses.md)
 
 cd frontend && npm install && npm run dev     # http://localhost:5173
 npm run build                                 # tsc + vite build
 
-bash scripts/verify.sh                        # compile + build + parity, one shot
-bash scripts/bench.sh crab_regenerating --reference   # headless GPU correctness/perf
+bash scripts/verify.sh                        # compile + tests + meta + build + parity
+nix run .#playground                          # serve the built site (also a NixOS module)
+nix flake check                               # build the site (the deploy test suite)
+bash scripts/bench.sh crab.regenerating --reference   # headless GPU correctness/perf
+
+bash slurm/submit_sweep.sh slurm/sweeps/emoji-sweep.toml   # cluster: 18 jobs
 ```
 
-Frontend URL params: `?ep=wasm|shader`, `?log=1` (ORT logs).
-Engine choice persists in `localStorage` (`nca.ep`).
-
-## Frontend engines (Engine dropdown)
+## Frontend engines
 
 | engine | runtime | notes |
 |---|---|---|
-| `wasm` | onnxruntime-web WASM | **compatibility fallback**; runs anything the shader cannot |
-| `shader` | native WGSL | **the performance path**; 2 dispatches, zero-copy render + GPU brush |
+| `wasm` | onnxruntime-web WASM | compatibility fallback |
+| `shader` | native WGSL | performance path; work-skip (4 passes, 1.6x) or 2 passes for deep models; zero-copy render + GPU brush |
 
-The ORT **WebGPU EP was removed**: each ONNX node is its own dispatch (~1-12 ms
-per node on an iGPU), so it lost to both WASM and the shader. Dropping it also
-moved the import to `onnxruntime-web/wasm`, which halved the bundled wasm
-(26.8 -> 14.2 MB) and cut the JS by ~30%.
-
-`shader` renders each view straight from the GPU
-state buffer (`renderTo`) and applies brush strokes with a compute shader
-(`brush`), so nothing is downloaded per frame. `wasm` renders through
-Canvas2D and calls `sync()` to refresh the CPU mirror `x`.
-
-## Shader performance (important)
-
-`scripts/shader_bench.py` runs the real shaders headlessly on the GPU via Vulkan
-and diffs against onnxruntime — **use it instead of guessing**:
-
-```bash
-bash scripts/bench.sh crab_regenerating --steps 150 --reference
-bash scripts/bench.sh crab_regenerating --grid 256 --shader scripts/variants/foo.wgsl
-```
-
-Findings so far (Intel UHD 620):
-- The **MLP is ~98%** of the step; perception is ~0.06 ms.
-- It is bound by **weight loads**, not FLOPs.
-- `vec4` weight loads + 4-hidden-at-a-time: **3.2–3.6×** (see `pass1.wgsl`).
-  Current: 72² 1.54 ms · 128² 4.40 ms · 256² 16.8 ms.
-- Tried and **rejected** (slower): `perc` in workgroup shared memory
-  (added LDS + cost occupancy; the private array was in registers already),
-  explicit 4-way ILP (compiler already does it), a 16×16 workgroup, and 2-cell
-  register tiling (register spill → 5.2 ms and incorrect).
-  The experiments are kept in `scripts/variants/`.
-- Remaining ideas (not tried):
-  1. **Tiled GEMM for the MLP** (tile cells into shared memory, stream the weights
-     once per tile) — the proper fix at 512²+, but a real WGSL matmul project.
-  2. **fp16** weights/activations — the iGPU exposes `shader-f16`; maybe ~2×, but
-     real precision risk (the bench settles it immediately).
-  3. **Split hidden units across workgroups** and reduce `dx` with atomics to cut
-     per-thread weight reads.
-- The kernel is **size-generic**: `C`, `NP4`, `W1S4`, `HG` are WGSL `override`
-  constants set per pipeline. They must stay *compile-time* — dynamic loop bounds
-  cost ~1.9×. Export pads each `W1` row to `3C → ceil(3C/4)*4` floats so `vec4`
-  loads stay aligned; at `C=16` that is a no-op, so old `weights.bin` is unchanged.
-  Supported: `4 ≤ C ≤ 16`, `hidden % 4 == 0` (`ShaderRunner.supports`), else the
-  frontend falls back to WASM.
-- The bench's `--reference` reports a **1-step** diff as the correctness gate; the
-  N-step diff is larger because the CA is chaotic.
-
-## Training performance (measured, 72×72, 80-step unroll)
-
-The unroll is **throughput-bound, not latency-bound**: its time is *exactly*
-linear in batch size, so a larger batch buys nothing on MIG (and only ~1.8× on an
-under-utilised H100). Non-unroll code (pool sample/rank/damage, grad norm,
-commit, `.item()`) is ~0.3 ms of a 54 ms (H100) / 429 ms (MIG) iteration.
-
-| batch | MIG fp32 / bf16 | H100 fp32 / bf16 |
-|---:|---|---|
-| 8 | 235 / 150 ms | — |
-| 16 | 429 / 331 ms (2.3 it/s) | 54 / 55 ms (18.6 it/s) |
-| 24 | 642 / 534 ms | — |
-| 32 | — | 85 / 74 ms |
-| 64 | — | 156 / 126 ms |
-| 128 | — | 302 / 244 ms |
-
-Samples/s: MIG 34→37→37 (8→24); H100 298→432→510→525 (16→128). Peak GPU memory
-at batch 16: **5.6 GB fp32 / 3.0 GB bf16**, linear in `batch_size x train_steps`
-(autograd keeps every step's activations), so a `1g.10gb` slice caps out near
-batch 24.
-
-- **A full H100 is ~8× a MIG slice at the same batch and schedule** (8000 iters
-  at batch 16: ~7 min vs ~54 min). Use an H100 for a single run; use the 14 MIG
-  slices for a *sweep*, which parallelises better than one GPU serially.
-- **`--amp bf16`**: ~1.3–1.55× on MIG and halves memory; neutral on H100 at batch
-  16, ~1.2–1.3× at batch ≥ 32.
-- **`torch.compile` does not help** (module: neutral; whole sequence: slower via
-  warmup + per-`n` specialisation). CUDA graphs are untested and only matter if
-  the step were latency-bound, which it is not.
-- Training draws the whole unroll's fire mask up front (`torch.rand([n,B,1,H,W])`)
-  instead of one `rand_like` per step, and keeps losses as device scalars until a
-  log/checkpoint needs the number (no per-step `.item()` sync). Regenerate this
-  table with `sbatch slurm/profile.sbatch`.
-
-## Model capacity (crab / regenerating, 8k iters)
-
-The paper size (C=16, hidden=128, **8336 params**) reaches min loss **2.0e-4**. The
-sweep models are in `exports/crab_c*_h*`:
-
-| hidden | C | params | min loss | ×base |
-|---:|---:|---:|---:|---:|
-| 128 | 16 | 8336 | 2.0e-4 | 1 × |
-| 128 | 12 | 6284 | 2.4e-3 | 12 × |
-| 128 | 8 | 4232 | 5.7e-3 | 28 × |
-| 64 | 16 | 4176 | 8.8e-3 | 44 × |
-| 128 | 6 | 3206 | 9.2e-3 | 46 × |
-| 32 | 16 | 2096 | 1.3e-2 | 63 × |
-| 16 | 16 | 1056 | 2.0e-2 | 99 × |
-| 8 | 16 | 536 | 1.9e-2 | 96 × |
-
-Channels are the cheaper axis to cut at equal params (C=12 beats hidden=64); below
-~4k params quality falls off a cliff.
-
-## Robustness / the kernel lab is a probe, not a toy
-
-Perturbing the perception kernels in the playground's kernel lab gives a cell a
-scrambled view of its neighbourhood *without* changing its state. A model trained
-only on clean perception + circle damage has no return path from the states that
-produces: it falls into a noisy attractor that is absorbing and never recovers.
-That is an out-of-distribution perturbation the training regime never covered.
-
-Training with state noise (`--experiment noisy`, or `--noise-n` / `--noise-std`)
-fixes it: the update rule is then asked to map a whole neighbourhood of corrupted
-states back to the target, which widens the target's basin. It costs nothing in
-fidelity — `crab_noisy` reaches min loss **2.45e-4** vs **2.58e-4** for the plain
-fp32 `regenerating` baseline, with 4 of every 16 pool samples corrupted.
-
-Takeaway: robustness tracks the *breadth of perturbation seen during training*,
-not the amount of damage. Circle damage only ever zeroes contiguous blobs, so it
-does not cover the space the kernel lab can reach. Neither is captured by the
-training loss, which is not comparable across regimes — the failure was found by
-playing with the kernel lab, not by a metric.
-
-## Conditional (multi-target) models
-
-`--targets SPEC...` makes one CA reproduce several targets: a `cond_n`-wide one-hot
-is appended to every cell's perception, so `update[0]` takes `3C + cond_n` inputs.
-It is a **separate input, not an extra state channel** - `x = x * life_mask` would
-zero it in every dead cell, and since the exported graph *is* the step, the
-frontend could not re-clamp it. `prepare_targets()` centres each spec in a
-`max_size` canvas so non-square emoji share a grid, and the pool carries a
-per-slot `cond` (a state only means something together with the target it was
-grown towards). Both ONNX (a `[B, cond_n, 1, 1]` input) and the shader
-(`CONDN` + the one-hot appended to `perc`) support it.
-
-`--mismatch-p` breaks the `(state, cond)` pairing for a slice of each batch: an
-already-grown emoji is asked to become a *different* one. Without it every pair is
-self-consistent, so a small MLP could satisfy the task by memorising N attractors
-and treating the one-hot as an index.
-
-Measured (hidden stays 128):
-
-| run | targets | params | min loss |
-|---|---:|---:|---:|
-| `multi2` | 2 | 8592 | 2.4e-3 |
-| `multi4` | 4 | 8848 | 1.9e-3 |
-| `multi6` | 6 | 9104 | 3.4e-3 |
-| `multi8` | 8 | 9360 | 3.9e-3 |
-
-All four grow the *correct* emoji for each one-hot index (verified by rolling each
-index out from the seed) - **no condition collapse even at 8 emoji**. Quality does
-fall with N (visibly blurrier at 8), so one shared MLP is capacity-limited rather
-than conditioning-limited. These losses are ~10x a single-target 2.0e-4 and are not
-comparable across regimes - check the playground, not the number.
-
-### `--mismatch-p` is what makes the conditioning *steer* (`cross*` vs `multi*`)
-
-The same sweep with `--mismatch-p 0.3` (`cross2..8`) costs ~1.5-2x in loss
-(min 3.2e-3 / 3.4e-3 / 4.1e-3 / 5.8e-3 for N=2/4/6/8 vs 2.4e-3 / 1.9e-3 / 3.4e-3 /
-3.9e-3 matched), because the task is strictly harder. But it buys the property the
-matched models do not have. Grow emoji 0, then switch the one-hot to emoji 1 mid-run
-(err vs each target's image, 0-255):
-
-| model | err vs source | err vs dest | result |
-|---|---:|---:|---|
-| `multi4` | 20.5 | 10.1 | **a purple crab** - recolours a memorised attractor, body plan frozen |
-| `cross4` | 24.3 | 5.3 | crab -> octopus, morphs |
-| `cross8` | 24.4 | 5.8 | morphs |
-
-So a matched model treats the one-hot as an *index* into N attractors: it follows
-the colour code but cannot restructure. Only cross-target training makes the
-one-hot modulate the update rule itself. Loss cannot show this - it is not
-comparable across regimes and both models score well - which is why the check is
-to switch the target mid-run in the playground.
-
-The frontend's `setCond()` therefore does **not** reset the state: switching the
-Target picker converts in place, which is the only way to see this. The picker is a
-vector of sliders (-1..1), not a one-hot selector, so out-of-distribution mixtures
-(0.5/0.5) can be tried too.
-
-### Wider vs deeper for 8 emoji (`cross8_wide` / `cross8_deep`)
-
-Both 8-target, `--mismatch-p 0.3`, same schedule; baseline `cross8` is hidden=128,
-1 layer, 9360 params.
-
-| run | shape | params | min loss | 8/8 correct | converts | shader |
-|---|---|---:|---:|---|---|---|
-| `cross8` | h128 x1 | 9360 | 5.8e-3 | yes | yes | 1.8 ms |
-| `cross8_wide` | h256 x1 | 18.7k | 3.8e-3 | yes | yes | 3.3 ms |
-| `cross8_deep` | h128 x2 | 25.9k | **2.7e-3** | yes | yes | 10.2 ms |
-
-All three grow the right emoji for every index and convert 0->1, so neither change
-broke conditioning. Depth is the better use of capacity (2.7e-3 vs 3.8e-3 at 38%
-more params), and the visual difference is subtle - the loss ranking is the clearer
-signal here, but they do have different budgets, so this does not isolate width
-from depth.
-
-Shader cost is worth knowing: the `hidden -> hidden` layer is ~2.7x the `W1` work and
-the rest is register pressure from holding the hidden vector, so `cross8_deep` runs
-at ~98 steps/s vs ~620 for a 128-wide single-layer model. Still interactive.
+Both advertise a `Capabilities` object (`frontend/src/engine.ts`) and `checkSpec()`
+is the only place a spec is tested against one — no `?.` feature probing. The ORT
+**WebGPU EP was removed** (per-node dispatch lost to both); do not reintroduce it.
+Details: [`docs/findings/frontend-engines.md`](docs/findings/frontend-engines.md).
 
 ## Gotchas
 
-- **NixOS + Vulkan (for `scripts/shader_bench.py`)**: the loader/ICDs aren't on
-  the default path. `scripts/bench.sh` sets them up. Without it wgpu reports
-  "No suitable graphics adapter found".
-- **Cluster (ARNES)**: `gpu` partition is **mixed H100 + V100S**; pin the H100s
-  with `--constraint=h100` (CUDA 13 dropped Volta). Lmod also exports a Python
-  3.12 `PYTHONPATH` that shadows the venv — `slurm/train.sbatch` unsets it.
-  Clone over HTTPS (the cluster has no GitHub SSH key).
-- **Dynamo ONNX export** writes weights as *external data* by default — the
-  exporter passes `external_data=False` so the `.onnx` is self-contained.
-- **`torch.onnx.export(dynamic_shapes=...)`** takes **positional / forward arg
-  names**, not ONNX input names.
-- The ORT **WebGPU EP is gone** (see the engine table above) - each ONNX node is
-  its own dispatch, so it lost to both WASM and the shader. Don't reintroduce its
-  provider options (`validationMode`, buffer cache modes) either - they abort with
-  `InternalError: out of memory` in the current ORT-Web build.
+- **NixOS + Vulkan**: `scripts/bench.sh` sets up the loader/ICDs; skill: `headless-webgpu`.
+- **Cluster (ARNES)**: `gpu` is **mixed H100 + V100S** — pin `--constraint=h100`
+  (CUDA 13 dropped Volta). Lmod exports a 3.12 `PYTHONPATH` that shadows the venv
+  (`train.sbatch` unsets it). Clone over HTTPS (no GitHub SSH key).
+- **Dynamo ONNX export** writes weights as *external data* by default (the exporter
+  passes `external_data=False`), and **`dynamic_shapes=`** takes *positional/forward
+  arg* names, not ONNX input names.
 - `frontend`'s Vite `publicDir` is `../exports`, which Vite ignores for a dir
   outside the root; a small plugin in `vite.config.ts` serves `/models` instead.
-- The brush edits via `CaEngine.brush` (shader) or `edit` (ORT), which queues
-  edits while a step is in flight; a direct write during `session.run` is lost.
+- A run directory is self-describing (`spec.json`, `train.json`, `target.npy`,
+  `loss.json`, `state.pt`): read it with `ModelSpec.from_run_dir`.
 
 ## Workflows
 
-**Add a model**: train → `nca.export` (writes `exports/<id>/{model.onnx,meta.json,weights.bin,target.png}` and updates `exports/manifest.json`) → commit `exports/`.
+**Add a model**: train → `nca.export` (writes `exports/<id>/{model.onnx,meta.json,
+weights.bin,target.png}`, updates `manifest.json`) → `scripts/check_meta.py` → commit.
+When the run dir still exists the exporter also records `meta.loss` — the curve the
+picker's sparkline draws (bucket-averaged to ≤64 points, log scale). A 10-second
+smoke run gets a one-point curve; a real run gets a shape.
 
-**Change the shader**: edit `frontend/src/wgsl/pass1.wgsl` → `bash scripts/bench.sh <model> --reference` for correctness + perf → `npm run build`.
+**Change the shader**: edit `frontend/src/wgsl/pass1.wgsl` →
+`bash scripts/bench.sh <model> --reference` (correctness + perf) → `npm run build`.
 
-**Change the model**: edit `nca/model.py` → re-export **and re-verify** (parity should be ~1e-6) → re-export all models if the graph changed.
+**Change the model**: edit `nca/model.py` → `nca.export --all` **and re-verify**
+(parity ~1e-6) → `npm run build`. The exports do not depend on the training runs:
+`nca/export/rebuild.py` reconstructs a module from `meta.json` + `weights.bin` (+ the
+learned kernel), which is what `--rebuild` and the `--all` fallback use.
 
 ## Status
 
-- Training: working; `regenerating` regime produces crisp, self-healing patterns.
-- Frontend: `shader` engine is the fast path; `wasm` is the compatibility default.
-- Cluster: **all 18 sweep models exported** (24 models in `exports/`).
-- Next likely work: larger-grid/texture targets, per-channel stats / timeline UI,
-  and the remaining shader ideas listed above.
+- Training works; `regenerating` produces crisp, self-healing patterns. Frontend:
+  `shader` is the fast path, `wasm` the compatibility default.
+- 45 exported models (18 from the cluster sweeps). Next likely work: texture
+  targets, eval-per-checkpoint, and the shader ideas in `docs/findings/shader-perf.md`.

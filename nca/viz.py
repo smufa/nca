@@ -9,24 +9,40 @@ import numpy as np
 import torch
 from PIL import Image
 
+from . import step
 from .model import NeuralCA
+from .step import DEFAULT_MAPPING, ChannelMapping
 
 
-def to_alpha(x: torch.Tensor) -> torch.Tensor:
-    """Clamp the alpha channel to ``[0, 1]``. Shape ``[..., C, H, W]``."""
-    return x[:, 3:4].clamp(0.0, 1.0)
+def to_alpha(x: torch.Tensor, mapping: ChannelMapping = DEFAULT_MAPPING) -> torch.Tensor:
+    """The composite alpha, clamped to ``[0, 1]``. Shape ``[..., 1, H, W]``.
+
+    With ``mapping.a == -1`` the view is opaque, so this is all ones.
+    """
+    if mapping.a < 0:
+        return torch.ones_like(x[:, :1])
+    return x[:, mapping.a : mapping.a + 1].clamp(0.0, 1.0)
 
 
-def to_rgb(x: torch.Tensor) -> torch.Tensor:
-    """Composite premultiplied RGB over a white background."""
-    return 1.0 - to_alpha(x) + x[:, :3]
+def to_rgb(x: torch.Tensor, mapping: ChannelMapping = DEFAULT_MAPPING) -> torch.Tensor:
+    """Composite the mapped channels over the background (``out = c + (1-a)*bg``).
+
+    The torch twin of `nca.step.map_channels` / `nca.ts:mapChannels`; the default
+    mapping ``{r,g,b,a=3,bg=1}`` is the familiar premultiplied-RGB-over-white view.
+    """
+    channels = torch.cat([x[:, c : c + 1] for c in (mapping.r, mapping.g, mapping.b)], dim=1)
+    if mapping.a < 0:
+        return channels
+    return channels + (1.0 - to_alpha(x, mapping)) * mapping.bg
 
 
-def render(states: torch.Tensor) -> np.ndarray:
+def render(states: torch.Tensor, mapping: ChannelMapping = DEFAULT_MAPPING) -> np.ndarray:
     """``[B, C, H, W]`` tensor -> ``[B, H, W, 3]`` uint8 array."""
-    img = to_rgb(states).clamp(0.0, 1.0)
+    img = to_rgb(states, mapping).clamp(0.0, 1.0)
     arr = img.detach().permute(0, 2, 3, 1).cpu().numpy()
-    return np.uint8(arr * 255)
+    # Round, not truncate: `Uint8ClampedArray` (the frontend's canvas path) and
+    # `nca.step.map_channels` both round, and a gif is not worth a 1-LSB drift.
+    return np.rint(arr * 255.0).astype(np.uint8)
 
 
 def tile(images: np.ndarray, ncols: int | None = None, gap: int = 2) -> np.ndarray:

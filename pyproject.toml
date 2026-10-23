@@ -3,7 +3,7 @@ name = "nca"
 version = "0.1.0"
 description = "Neural Cellular Automata (Growing CA, Mordvintsev et al. 2020)"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.13"
 dependencies = [
     "torch>=2.14.1",
     "numpy>=2.0",
@@ -17,6 +17,7 @@ dev = [
     "onnx>=1.19",
     "onnxruntime>=1.24",
     "onnxscript>=0.2",
+    "pytest>=9.1.1",
 ]
 
 [tool.uv.sources]

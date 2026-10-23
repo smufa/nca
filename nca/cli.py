@@ -1,27 +1,36 @@
-"""Command line interface for training the Neural CA."""
+"""Command line interface for training the Neural CA.
+
+Two ways in:
+
+* ad hoc -- every knob is a flag, defaults come from :class:`nca.experiments.Experiment`;
+* from a sweep file -- ``--config slurm/sweeps/x.toml --run <name>``, with flags
+  and ``--set k=v`` as overrides of that run.
+
+The second form is what the cluster uses, and it is why the defaults live in one
+place: a flag whose default differs from the experiment's default *is* the drift
+this CLI used to have (``--target-size 32`` here, ``40`` in the exporter).
+"""
 
 from __future__ import annotations
 
 import argparse
 import time
+from dataclasses import fields, replace
 from pathlib import Path
 
 import numpy as np
 import torch
 
+from .experiments import REGIMES, Experiment, experiment_from_dict, load_sweep
 from .model import NeuralCA
 from .targets import make_seed, prepare_targets
-from .train import TrainConfig, train
+from .train import train
 from .viz import render, save_image, tile
 
-EXPERIMENTS = {
-    "growing": dict(use_pool=False, damage_n=0),
-    "persistent": dict(use_pool=True, damage_n=0),
-    "regenerating": dict(use_pool=True, damage_n=3),
-    # regenerating + Gaussian state noise: the unroll must reconstruct the target
-    # from a corrupted state, not just from a clean one with holes punched in it.
-    "noisy": dict(use_pool=True, damage_n=3, noise_n=4, noise_std=0.2),
-}
+# Backwards-compatible name: the regime table used to live here.
+EXPERIMENTS = REGIMES
+
+_TUPLE_FIELDS = {"targets", "unroll", "lr_milestones"}
 
 
 def _resolve_device(name: str) -> torch.device:
@@ -34,144 +43,232 @@ def _resolve_device(name: str) -> torch.device:
     return torch.device("cpu")
 
 
+def _coerce(key: str, raw: str):
+    """Best-effort typing for ``--set key=value`` (numbers, bools, tuples)."""
+    if key in _TUPLE_FIELDS:
+        parts = [p for p in raw.replace(" ", "").split(",") if p]
+        return tuple(int(p) if p.lstrip("-").isdigit() else p for p in parts)
+    for cast in (int, float):
+        try:
+            return cast(raw)
+        except ValueError:
+            continue
+    return {"true": True, "false": False, "none": None}.get(raw.lower(), raw)
+
+
 def build_parser() -> argparse.ArgumentParser:
+    d = Experiment()  # the single source of defaults; help text quotes it
     p = argparse.ArgumentParser(
         description="Train a Neural Cellular Automaton to grow a target pattern."
     )
-    p.add_argument(
-        "--target",
-        default="emoji:🦎",
-        help="target spec: emoji:🦎 | emoji:1f98e | image:path.png | shape:heart",
+
+    src = p.add_argument_group("experiment source")
+    src.add_argument("--config", default=None, metavar="TOML", help="sweep file (slurm/sweeps/*.toml)")
+    src.add_argument("--run", default=None, metavar="NAME", help="run name inside --config")
+    src.add_argument(
+        "--set",
+        action="append",
+        default=None,
+        metavar="KEY=VALUE",
+        help="override any experiment field (e.g. --set lr=1e-3 --set targets=emoji:1f980,emoji:1f419)",
     )
-    p.add_argument(
+
+    target = p.add_argument_group("target")
+    target.add_argument(
+        "--target", default=None, help=f"emoji:🦎 | emoji:1f98e | image:path.png | shape:heart (default {d.targets[0]})"
+    )
+    target.add_argument(
         "--targets",
         nargs="+",
         default=None,
         metavar="SPEC",
-        help="several targets -> a conditional model with a cond_n-way one-hot "
-        "selector (e.g. --targets emoji:1f980 emoji:1f419); overrides --target",
+        help="several targets -> a conditional model with a cond_n-way one-hot selector",
     )
-    p.add_argument("--target-size", type=int, default=32, help="target image size")
-    p.add_argument("--padding", type=int, default=8, help="border padding around target")
+    target.add_argument("--target-size", type=int, default=None, help=f"target image size (default {d.target_size})")
+    target.add_argument("--padding", type=int, default=None, help=f"border around the target (default {d.padding})")
 
-    p.add_argument(
+    train_ = p.add_argument_group("training")
+    train_.add_argument(
         "--experiment",
-        choices=sorted(EXPERIMENTS),
-        default="regenerating",
-        help="training regime (sets pool/damage defaults)",
-    )
-    p.add_argument("--no-pool", action="store_true", help="disable the sample pool")
-    p.add_argument(
-        "--damage-n", type=int, default=None, help="patterns to damage per batch"
-    )
-    p.add_argument(
-        "--noise-n",
-        type=int,
+        choices=sorted(REGIMES),
         default=None,
-        help="pool samples per batch to corrupt with Gaussian state noise",
+        help=f"training regime (default {d.regime}): "
+        + "; ".join(f"{r.name}={r.help.split(':')[0]}" for r in REGIMES.values()),
     )
-    p.add_argument(
-        "--noise-std",
-        type=float,
-        default=None,
-        help="std of the additive state noise (0 = off; try 0.1-0.3)",
+    train_.add_argument("--no-pool", action="store_true", help="disable the sample pool")
+    train_.add_argument("--damage-n", type=int, default=None, help="patterns to damage per batch")
+    train_.add_argument(
+        "--noise-n", type=int, default=None, help="pool samples per batch corrupted with state noise"
     )
-    p.add_argument(
+    train_.add_argument("--noise-std", type=float, default=None, help="std of that noise (0.1-0.3 works)")
+    train_.add_argument(
         "--mismatch-p",
         type=float,
-        default=0.0,
-        help="fraction of each batch asked to convert a grown target into a "
-        "different one (only meaningful with --targets; try 0.2-0.4)",
+        default=None,
+        help="fraction of each batch asked to convert a grown target into another one (needs --targets)",
     )
-    p.add_argument("--pool-size", type=int, default=1024)
-    p.add_argument(
+    train_.add_argument("--pool-size", type=int, default=None, help=f"sample pool size (default {d.pool_size})")
+    train_.add_argument(
         "--batch-size",
         type=int,
-        default=16,
-        help="patterns per step; GPU memory scales with batch_size x --train-steps",
+        default=None,
+        help=f"patterns per step (default {d.batch_size}); memory scales with batch_size x --train-steps",
     )
-
-    p.add_argument("--channels", type=int, default=16, help="number of state channels")
-    p.add_argument("--hidden", type=int, default=128, help="update-rule hidden width")
-    p.add_argument(
-        "--hidden-layers",
-        type=int,
-        default=1,
-        help="hidden (ReLU) blocks in the update rule; 2 adds a hidden->hidden layer",
-    )
-    p.add_argument("--fire-rate", type=float, default=0.5)
-    p.add_argument(
-        "--learn-perception",
-        action="store_true",
-        help="learn the Sobel dx/dy perception kernels (identity stays fixed)",
-    )
-    p.add_argument(
-        "--no-wrap",
-        action="store_true",
-        help="use zero (non-periodic) boundaries instead of circular wrapping",
-    )
-
-    p.add_argument("--iterations", type=int, default=1200)
-    p.add_argument(
+    train_.add_argument("--iterations", type=int, default=None, help=f"training iterations (default {d.iterations})")
+    train_.add_argument(
         "--train-steps",
         type=int,
         nargs=2,
-        default=[48, 64],
+        default=None,
         metavar=("MIN", "MAX"),
-        help="random number of CA steps unrolled per training step",
+        help=f"CA steps unrolled per training step (default {d.unroll[0]} {d.unroll[1]})",
     )
-    p.add_argument("--lr", type=float, default=2e-3)
-    p.add_argument(
+    train_.add_argument("--lr", type=float, default=None, help=f"learning rate (default {d.lr})")
+    train_.add_argument(
         "--lr-milestone",
         type=int,
         nargs="*",
         default=None,
         help="iteration(s) at which to decay the LR (default: 25%% of iterations)",
     )
-    p.add_argument("--lr-gamma", type=float, default=0.1)
-    p.add_argument("--no-grad-norm", action="store_true")
-    p.add_argument(
-        "--compile",
-        action="store_true",
-        help="torch.compile the CA step (faster unroll on GPU)",
-    )
-    p.add_argument(
+    train_.add_argument("--lr-gamma", type=float, default=None, help=f"LR decay factor (default {d.lr_gamma})")
+    train_.add_argument("--no-grad-norm", action="store_true")
+    train_.add_argument(
         "--amp",
         choices=["off", "bf16"],
-        default="off",
+        default=None,
         help="autocast dtype for the unroll (bf16 may be ~2x on compute-bound GPUs)",
     )
+    train_.add_argument("--seed", type=int, default=None, help=f"RNG seed (default {d.seed})")
 
-    p.add_argument("--device", default="auto")
-    p.add_argument("--threads", type=int, default=None, help="torch CPU threads")
-    p.add_argument("--seed", type=int, default=0)
-    p.add_argument("--out-dir", default=None)
-    p.add_argument(
-        "--run-name",
-        default=None,
-        help="deterministic run directory (runs/<name>)",
-    )
-    p.add_argument(
-        "--resume",
-        default=None,
-        help="resume training from a state.pt written by a previous run",
-    )
-    p.add_argument("--log-every", type=int, default=10)
-    p.add_argument("--ckpt-every", type=int, default=100)
-    p.add_argument(
-        "--progress-every",
+    model = p.add_argument_group("model")
+    model.add_argument("--channels", type=int, default=None, help=f"state channels (default {d.channels})")
+    model.add_argument("--hidden", type=int, default=None, help=f"update-rule hidden width (default {d.hidden})")
+    model.add_argument(
+        "--hidden-layers",
         type=int,
-        default=100,
-        help="render a batch montage every N iterations (0 = never)",
+        default=None,
+        help=f"hidden (ReLU) blocks / MLP depth (default {d.hidden_layers})",
     )
-    p.add_argument(
+    model.add_argument("--fire-rate", type=float, default=None, help=f"stochastic update rate (default {d.fire_rate})")
+    model.add_argument(
+        "--learn-perception",
+        action="store_true",
+        help="learn the Sobel dx/dy perception kernels (identity stays fixed)",
+    )
+    model.add_argument("--no-wrap", action="store_true", help="zero (non-periodic) boundaries")
+
+    run = p.add_argument_group("run control")
+    run.add_argument("--device", default="auto")
+    run.add_argument("--threads", type=int, default=None, help="torch CPU threads")
+    run.add_argument("--out-dir", default=None)
+    run.add_argument("--run-name", default=None, help="deterministic run directory (runs/<name>)")
+    run.add_argument("--resume", default=None, help="resume from a state.pt written by a previous run")
+    run.add_argument("--log-every", type=int, default=None, help=f"log interval (default {d.log_every})")
+    run.add_argument("--ckpt-every", type=int, default=None, help=f"checkpoint interval (default {d.ckpt_every})")
+    run.add_argument(
+        "--progress-every", type=int, default=None, help="render a batch montage every N iterations (0 = never)"
+    )
+    run.add_argument(
         "--save-pool",
         action="store_true",
         help="include the large sample pool in state.pt (exact resume; ~340 MB/ckpt)",
     )
-    p.add_argument("--no-gif", action="store_true")
-    p.add_argument("--gif-steps", type=int, default=120)
+    train_.add_argument(
+        "--loss",
+        action="append",
+        default=None,
+        metavar="K=V",
+        help="an extra loss term, e.g. --loss laplacian=0.5 --loss ssim=0.1 "
+        "--loss edge=0.05 --loss start=0.2 (merged over [loss] in a study file)",
+    )
+    run.add_argument("--no-gif", action="store_true")
+    run.add_argument("--gif-steps", type=int, default=None)
     return p
+
+
+def experiment_for(args: argparse.Namespace) -> Experiment:
+    """The experiment these arguments describe, in precedence order.
+
+    ``--config/--run`` (the file) < explicit flags < ``--set k=v``.
+    """
+    if args.config:
+        sweep = load_sweep(args.config)
+        if args.run:
+            base = sweep.by_name(args.run)
+        elif len(sweep.runs) == 1:
+            base = sweep.runs[0]
+        else:
+            raise SystemExit(f"{args.config} has {len(sweep.runs)} runs; pass --run <name>")
+    else:
+        if args.run:
+            raise SystemExit("--run selects a run inside --config; give --config too")
+        base = Experiment()
+
+    overrides = {
+        "targets": tuple(args.targets) if args.targets else None,
+        "regime": args.experiment,
+        "target_size": args.target_size,
+        "padding": args.padding,
+        "channels": args.channels,
+        "hidden": args.hidden,
+        "hidden_layers": args.hidden_layers,
+        "fire_rate": args.fire_rate,
+        "learn_perception": True if args.learn_perception else None,
+        "wrap": False if args.no_wrap else None,
+        "use_pool": False if args.no_pool else None,
+        "damage_n": args.damage_n,
+        "noise_n": args.noise_n,
+        "noise_std": args.noise_std,
+        "mismatch_p": args.mismatch_p,
+        "pool_size": args.pool_size,
+        "batch_size": args.batch_size,
+        "iterations": args.iterations,
+        "unroll": tuple(args.train_steps) if args.train_steps else None,
+        "lr": args.lr,
+        "lr_milestones": tuple(args.lr_milestone) if args.lr_milestone else None,
+        "lr_gamma": args.lr_gamma,
+        "normalize_grads": False if args.no_grad_norm else None,
+        "amp": args.amp,
+        "seed": args.seed,
+        "log_every": args.log_every,
+        "ckpt_every": args.ckpt_every,
+    }
+    if args.target:  # --target is a shorthand for a one-element --targets
+        overrides["targets"] = (args.target,)
+    exp = base.with_overrides(**overrides)
+
+    if args.set:
+        known = {f.name for f in fields(Experiment)}
+        patch = {}
+        for item in args.set:
+            if "=" not in item:
+                raise SystemExit(f"--set expects KEY=VALUE, got {item!r}")
+            key, raw = item.split("=", 1)
+            if key not in known:
+                raise SystemExit(f"--set: unknown field {key!r}; known: {sorted(known)}")
+            patch[key] = _coerce(key, raw)
+        exp = experiment_from_dict({**exp.as_dict(), **patch})
+
+    if args.loss:
+        # Merge over whatever the study file said, so a sweep states its loss once
+        # and one flag can vary a weight without copying the whole table.
+        from .losses import LossConfig
+
+        merged = {**(base.loss or {})}
+        for item in args.loss:
+            if "=" not in item:
+                raise SystemExit(f"--loss expects KEY=VALUE, got {item!r}")
+            key, raw = item.split("=", 1)
+            try:
+                merged[key] = float(raw)
+            except ValueError:
+                raise SystemExit(f"--loss {key}: {raw!r} is not a number") from None
+        exp = replace(exp, loss=LossConfig.from_dict(merged).as_dict())
+
+    if args.run_name:
+        exp = replace(exp, name=args.run_name)
+    return exp
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -180,30 +277,25 @@ def main(argv: list[str] | None = None) -> None:
     if args.threads:
         torch.set_num_threads(args.threads)
     device = _resolve_device(args.device)
-    preset = EXPERIMENTS[args.experiment]
-    use_pool = preset["use_pool"] and not args.no_pool
-    damage_n = preset["damage_n"] if args.damage_n is None else args.damage_n
-    noise_n = preset.get("noise_n", 0) if args.noise_n is None else args.noise_n
-    noise_std = preset.get("noise_std", 0.0) if args.noise_std is None else args.noise_std
-    if not args.lr_milestone:
-        args.lr_milestone = [max(1, int(0.25 * args.iterations))]
+    exp = experiment_for(args)
 
     # --- targets ---------------------------------------------------------
-    specs = args.targets or [args.target]
-    target = prepare_targets(specs, max_size=args.target_size, padding=args.padding)
+    specs = list(exp.targets)
+    target = prepare_targets(specs, max_size=exp.target_size, padding=exp.padding)
     _, _, h, w = target.shape
-    cond_n = len(specs) if len(specs) > 1 else 0
-    seed = make_seed(h, w, args.channels)
+    seed = make_seed(h, w, exp.channels)
 
     # --- output directory ----------------------------------------------
-    if args.run_name:
-        out_dir = Path("runs") / args.run_name
-    elif args.out_dir is None:
-        safe = args.target.replace(":", "_").replace("/", "_")
-        stamp = time.strftime("%Y%m%d-%H%M%S")
-        out_dir = Path("runs") / f"{safe}_{args.experiment}_{stamp}"
-    else:
+    # An explicit --out-dir wins over the run's name (it is the more specific
+    # instruction, and the tests/tools use it to keep runs/ clean).
+    if args.out_dir is not None:
         out_dir = Path(args.out_dir)
+    elif exp.name:
+        out_dir = Path("runs") / exp.name
+    else:
+        safe = specs[0].replace(":", "_").replace("/", "_")
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        out_dir = Path("runs") / f"{safe}_{exp.regime}_{stamp}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Save a preview of the padded target(s) and the seed.
@@ -211,46 +303,52 @@ def main(argv: list[str] | None = None) -> None:
     save_image(render(seed.unsqueeze(0))[0], out_dir / "seed.png")
     np.save(out_dir / "target.npy", target.numpy())
 
-    cfg = TrainConfig(
-        iterations=args.iterations,
-        batch_size=args.batch_size,
-        pool_size=args.pool_size,
-        use_pool=use_pool,
-        damage_n=damage_n,
-        noise_n=noise_n,
-        noise_std=noise_std,
-        mismatch_p=args.mismatch_p,
-        train_steps_min=args.train_steps[0],
-        train_steps_max=args.train_steps[1],
-        lr=args.lr,
-        lr_milestones=tuple(args.lr_milestone),
-        lr_gamma=args.lr_gamma,
-        normalize_grads=not args.no_grad_norm,
-        log_every=args.log_every,
-        ckpt_every=args.ckpt_every,
-        progress_every=args.progress_every,
-        save_pool=args.save_pool,
-        make_gif=not args.no_gif,
-        gif_steps=args.gif_steps,
-        seed=args.seed,
-        compile=args.compile,
-        amp=args.amp,
-    )
+    cfg = exp.train_config()
+    if args.progress_every is not None:
+        cfg = replace(cfg, progress_every=args.progress_every)
+    if args.save_pool:
+        cfg = replace(cfg, save_pool=True)
+    if args.no_gif:
+        cfg = replace(cfg, make_gif=False)
+    if args.gif_steps is not None:
+        cfg = replace(cfg, gif_steps=args.gif_steps)
 
     ca = NeuralCA(
-        channel_n=args.channels,
-        fire_rate=args.fire_rate,
-        hidden_n=args.hidden,
-        wrap=not args.no_wrap,
-        learn_perception=args.learn_perception,
-        cond_n=cond_n,
-        hidden_layers=args.hidden_layers,
+        channel_n=exp.channels,
+        fire_rate=exp.fire_rate,
+        hidden_n=exp.hidden,
+        wrap=exp.wrap,
+        learn_perception=exp.learn_perception,
+        cond_n=exp.cond_n,
+        hidden_layers=exp.hidden_layers,
     )
 
-    print(f"Targets: {', '.join(specs)}  ({args.target_size}px, padded to {h}x{w})")
-    if cond_n:
-        print(f"Conditional model: cond_n={cond_n} one-hot selector")
-    train(ca, target, seed, cfg, device, out_dir, resume=args.resume)
+    print(f"Targets: {', '.join(specs)}  ({exp.target_size}px, padded to {h}x{w})")
+    if exp.cond_n:
+        print(f"Conditional model: cond_n={exp.cond_n} one-hot selector")
+    print(f"Experiment: {exp.name or '(unnamed)'}  regime={exp.regime}  iterations={exp.iterations}")
+    train(
+        ca,
+        target,
+        seed,
+        cfg,
+        device,
+        out_dir,
+        resume=args.resume,
+        provenance={
+            # The regime as a string (what meta.json has always recorded) plus the
+            # resolved experiment, so an export or a paper can be rebuilt from runs/.
+            "experiment": exp.regime,
+            "experiment_config": exp.as_dict(),
+            "target": specs[0],
+            "targets": specs,
+            "grid": [int(h), int(w)],
+            # The canvas split, so an export can rebuild target.png on the same
+            # grid even after target.npy is gone (grid = target_size + 2*padding).
+            "target_size": exp.target_size,
+            "padding": exp.padding,
+        },
+    )
 
 
 if __name__ == "__main__":
