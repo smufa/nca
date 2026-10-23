@@ -40,11 +40,17 @@ The whole point of the architecture is that **one trained model = a single
   without the `runs/` checkout; the checkpoint-based checks skip in a clean clone).
   `update[0]`'s fan-in is `3C + cond_n`; deriving `C` from
   it is wrong (that bug lived in `nca/sample.py`).
+- **Read the step's *constants* from `nca/step.py`, never re-type them.** The
+  perception basis, the depthwise weight, the seed cell and the channel->pixel
+  mapping are shared by torch, numpy (`scripts/shader_bench.py`), WGSL and
+  `frontend/src/nca.ts`. `nca/step.py` may not import torch (that is what keeps it
+  a shared definition), and `tests/test_step.py` fails when `nca.ts` drifts.
 
 ## Repo layout
 
 ```
 nca/spec.py         ModelSpec: the shape of a model (channels, hidden, hidden_layers, cond_n)
+nca/step.py         torch-free primitives: perception kernels/weight, seed, channel->pixel
 nca/model.py        NeuralCA (perception, update rule, fire + living masks)
 nca/experiments.py  Experiment + REGIMES: every training default, in one place
 nca/sweep.py        `python -m nca.sweep <toml>`: render one sbatch call per run
@@ -111,7 +117,7 @@ uv run python -m nca.export --reindex --refresh-targets  # also re-render target
 uv run python -m nca.sample --run runs/NAME --steps 300         # shape from spec.json, else the checkpoint
 uv run python -m nca.sample --run runs/cross8.mismatch --cond 3 # conditional model, target 3
 uv run python -m nca.sweep slurm/sweeps/cross.toml --dry-run    # what would sbatch
-uv run python -m pytest -q tests              # 412 tests, ~5 s on CPU
+uv run python -m pytest -q tests              # the suite (CPU, seconds)
 uv run python -m scripts.check_meta           # exports/*/meta.json vs nca/spec.py
 
 cd frontend && npm install && npm run dev     # http://localhost:5173

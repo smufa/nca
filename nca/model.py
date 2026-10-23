@@ -7,16 +7,15 @@ channels-first ``[B, C, H, W]`` layout.
 
 from __future__ import annotations
 
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from . import step
 from .spec import ModelSpec
 
-ALPHA_CHANNEL = 3
-ALIVE_THRESHOLD = 0.1
+ALPHA_CHANNEL = step.ALPHA_CHANNEL
+ALIVE_THRESHOLD = step.ALIVE_THRESHOLD
 
 
 def _circular_pad2d(x: torch.Tensor, pad: int) -> torch.Tensor:
@@ -49,18 +48,11 @@ def get_living_mask(x: torch.Tensor, wrap: bool = True) -> torch.Tensor:
 def _canonical_kernels(angle: float = 0.0) -> torch.Tensor:
     """The three 3x3 perception kernels, ``(identity, d/dx, d/dy)``, as ``[3,3,3]``.
 
-    The Sobel filters are normalised by 8 as in the reference implementation.
+    The numbers live in `nca.step` (the torch-free definition shared with the GPU
+    bench, `nca.viz` and the frontend); this is only the torch view of them.
     ``angle`` rotates dx/dy, which is what the frontend's kernel lab exposes.
     """
-    ident = torch.tensor([0.0, 1.0, 0.0])
-    ident = torch.outer(ident, ident)
-    dx = torch.outer(
-        torch.tensor([1.0, 2.0, 1.0]), torch.tensor([-1.0, 0.0, 1.0])
-    ) / 8.0
-    dy = dx.t()
-
-    c, s = math.cos(angle), math.sin(angle)
-    return torch.stack([ident, c * dx - s * dy, s * dx + c * dy], dim=0)
+    return torch.from_numpy(step.canonical_kernels(angle))
 
 
 def _kernels_to_weight(channel_n: int, kernels: torch.Tensor) -> torch.Tensor:

@@ -388,20 +388,25 @@ current studies are reproducible from their TOMLs.
 
 ---
 
-## Phase 4 — `nca/eval.py`: the missing measurement loop
+## Phase 4 — measurement loop — DEFERRED (decided 2026-04-18)
 
-The repo's best claims (conversion `err vs dest 5.3`, capacity table, robustness
-under noise) were computed ad hoc and cannot be regenerated. That is the biggest
-functional gap for a project whose value is quantitative.
+**Not doing it now.** `loss.json`/`meta.train.min_loss` already answers the
+quantitative questions the project is currently asking, because the comparisons in
+`docs/findings/` are same-regime (same curriculum, same loss definition). Building a
+scoring framework ahead of needing it would be a solution looking for a problem.
 
-- [ ] `score(checkpoint_or_spec, targets, steps, seeds) -> {per_target_err,
-      converged_at, min_loss, final_alpha_coverage}` — CPU-only.
-- [ ] `score --sweep <dir>` → a markdown table, so `docs/findings/*` tables are
-      generated, not transcribed.
-- [ ] `eval --cond-switch a b` for the `multi*` vs `cross*` conversion metric.
+Two things stay unmeasured, and that is a known, accepted gap:
 
-**Acceptance:** every table in `docs/findings/conditioning.md` and
-`docs/findings/capacity.md` is reproducible by one command.
+- `docs/findings/conditioning.md:42`'s `err vs source 24.3 / err vs dest 5.3` has no
+  code path — it was computed by hand and 24 of its checkpoints lived in `/tmp`.
+- "self-healing" (README) is shown as a GIF (`nca.sample --damage-at`), never scored.
+
+**When it comes back**, the cheap shape is a `--score` flag on `nca/sample.py`
+(≈60 lines, which already has the rollout loop, `_damage()` and `_select_cond()`),
+printing `{loss, converged_at, alpha_cov, damage:{residual, recovered_at}}` instead
+of authoring `nca/eval.py`. Revisit when the first *cross-regime* comparison is
+needed (growing vs regenerating is not comparable through `min_loss` today) or when
+6b (textures) needs a texture metric.
 
 ---
 
@@ -430,12 +435,16 @@ supports(spec: ModelSpec): { ok: true } | { ok: false; reason: string }
   **Both engines stay first-class** (decision 1): `ort` advertises
   `maxC/maxHidden = ∞` and `gpuRender: false`.
 - [ ] `nca/export.py` (506 lines) → `nca/export/{graph,weights,verify,manifest}.py`.
-- [ ] `nca/step.py`: torch-free canonical primitives (`ident/dx/dy`,
-      `perception_weight`, `make_seed`, `render`) importable by
-      `scripts/shader_bench.py` (which currently reimplements them in numpy at
-      `shader_bench.py:32-52`) and mirrored by `nca.ts`. Plus `viz.py`'s
-      `to_rgb` generalised onto `ChannelMapping` (it is hardcoded to channels 0-3
-      over white, while `nca.ts:mapChannels` and `draw.wgsl` are general).
+- [x] `nca/step.py`: torch-free canonical primitives (`ident/dx/dy`,
+      `perception_weight`, `make_seed`, `map_channels`/`ChannelMapping`) imported
+      by `nca/model.py`, `nca/targets.py`, `nca/viz.py` and
+      `scripts/shader_bench.py` (which used to re-typye the kernels in numpy);
+      `viz.to_rgb`/`render` now take a `ChannelMapping`, so the Python gif path can
+      draw hidden-channel views like the frontend does. `tests/test_step.py`
+      checks the torch path, the seed, the TS mirror *textually*, and that the
+      module never imports torch. Rounding: `map_channels` rounds (the TS side
+      writes a `Uint8ClampedArray`), which is 1 LSB different from the old
+      truncating `np.uint8(arr * 255)`.
 
 ---
 

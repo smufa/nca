@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import struct
+import sys
 import time
 from pathlib import Path
 
@@ -27,32 +28,26 @@ import wgpu
 
 ROOT = Path(__file__).resolve().parent.parent
 WGSL_DIR = ROOT / "frontend" / "src" / "wgsl"
+# This script is run as `python scripts/shader_bench.py`, so sys.path[0] is
+# scripts/ -- make the repo importable before reaching for the shared kernels.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from nca import step as steplib  # noqa: E402  (after the sys.path fix)
 
 
-def canonical_kernels() -> tuple[np.ndarray, np.ndarray]:
-    ident = np.array([0, 0, 0, 0, 1, 0, 0, 0, 0], np.float32)
-    dx = np.array([-1, 0, 1, -2, 0, 2, -1, 0, 1], np.float32) / 8.0
-    dy = np.array([-1, -2, -1, 0, 0, 0, 1, 2, 1], np.float32) / 8.0
-    return np.stack([ident, dx, dy]).reshape(-1)
+def canonical_kernels() -> np.ndarray:
+    """The 27-float kernel buffer the shader takes, `[identity, dx, dy]` flat."""
+    return steplib.canonical_kernels().reshape(-1)
 
 
 def perception_weight(C: int) -> np.ndarray:
     """[3C, 1, 3, 3] depthwise weight for the ONNX model."""
-    ident = np.array([0, 0, 0, 0, 1, 0, 0, 0, 0], np.float32)
-    dx = np.array([-1, 0, 1, -2, 0, 2, -1, 0, 1], np.float32) / 8.0
-    dy = np.array([-1, -2, -1, 0, 0, 0, 1, 2, 1], np.float32) / 8.0
-    w = np.zeros((3 * C, 1, 3, 3), np.float32)
-    for ci in range(C):
-        w[3 * ci + 0, 0] = ident.reshape(3, 3)
-        w[3 * ci + 1, 0] = dx.reshape(3, 3)
-        w[3 * ci + 2, 0] = dy.reshape(3, 3)
-    return w
+    return steplib.perception_weight(C)
 
 
 def make_seed(C: int, grid: int) -> np.ndarray:
-    x = np.zeros((1, C, grid, grid), np.float32)
-    x[0, 3:, grid // 2, grid // 2] = 1.0
-    return x
+    return steplib.make_seed(C, grid, grid)[None]
 
 
 def read_back(device, src, nbytes: int) -> np.ndarray:
