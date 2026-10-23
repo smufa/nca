@@ -171,3 +171,46 @@ assumption in this file that "the CA is chaotic, so error compounds" was wrong f
 short horizons — it is contractive; what amplifies is the *living-mask threshold*
 once the error reaches ~0.1, which is why the failure mode is a pattern that
 heals into a slightly different pattern rather than a blur.
+
+## Work skipping: compaction instead of a branch (1.5-2.7x, shipped as an experiment)
+
+At `fire_rate 0.5` half of every grid is copied unchanged, yet `pass1.wgsl` runs
+the full MLP for those cells and multiplies the result by zero. The branch version
+(`pass1_fireearly.wgsl`, -11%) fails because a workgroup of mixed cells pays both
+paths. Compaction sidesteps that: list the cells that fire, then dispatch the
+update rule with `dispatch_workgroups_indirect` over the list only.
+
+Four dispatches per step instead of two (`scripts/work_skip_bench.py`,
+`scripts/variants/ws_*.wgsl`):
+
+1. `ws_compact`: `out = state` for every cell, plus `atomicAdd` of firing cells
+2. `ws_finalize` (1 thread): list length -> indirect args, `ceil(n/64)`
+3. `ws_mlp`: the shipped `step` body, with the cell index from the list, dispatched
+   with `dispatch_workgroups_indirect` (one 64-wide workgroup per 64 cells)
+4. `pass2` unchanged (living mask)
+
+Bit-exact against the baseline pipeline over 20 steps (`max|d| = 0.000e+00`), because
+the MLP code is `pass1.wgsl`'s, unchanged.
+
+| grid | fire_rate | baseline | work-skip | speedup |
+|---|---|---|---|---|
+| 72² | 0.5 | 1.25 ms | 0.84 ms | **1.50x** |
+| 256² | 0.5 | 12.6 | 8.0 | **1.59x** |
+| 512² | 0.5 | 49.0 | 29.8 | **1.65x** |
+| 1024² | 0.5 | 218 | 138 | **1.59x** |
+| 256² | 0.2 | 12.6 | 4.6 | **2.74x** |
+| 256² | 1.0 | 12.6 | 13.6 | **0.93x** |
+
+The `fire_rate 1.0` row is the control: with every cell firing, compaction costs
+7% (the copy pass, the atomics, and the now-scattered perception gather instead of
+a coalesced one). So the saving is `~1/(1 + 0.07) * (1 + f*(1-1/r))`-shaped: it
+scales with the fraction of cells that *do not* fire, and the losses are small
+enough that the scheme is worth having unconditionally — but only above a few
+hundred live-neighbourhood cells, and only where indirect dispatch exists (WebGPU
+core; not in WebGL2).
+
+Two yields nobody expected: the fire-rate slider currently does not affect step
+cost at all (every cell computes regardless), so this is what makes "lower fire
+rate" a real performance knob; and the scattered gather after compaction is cheap
+because the perception reads land in the same few L2 lines the baseline already
+touches.
