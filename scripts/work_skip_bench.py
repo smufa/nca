@@ -14,8 +14,8 @@ workgroup size differ). An 11% slower branch-based version already exists --
 see docs/findings/shader-perf.md -- the interesting question is whether
 compaction avoids the divergence cost.
 
-Usage: bash scripts/bench.sh --work-skip crab.regenerating   (.venv/bin/python works
-too; the NixOS loader env is only needed for the adapter)
+Usage: bash scripts/bench.sh work-skip crab.regenerating   (.venv/bin/python works
+if it has wgpu; the NixOS loader env is only needed for the adapter)
 """
 
 from __future__ import annotations

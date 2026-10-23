@@ -22,11 +22,19 @@ if [[ -n "$LOADER" ]]; then
 fi
 export VK_ICD_FILENAMES="${VK_ICD_FILENAMES:-/run/opengl-driver/share/vulkan/icd.d/intel_icd.x86_64.json}"
 
+# `bench.sh work-skip <model>` runs the work-skipping comparison instead (it needs
+# no onnxruntime: it checks parity against the shipped two-pass pipeline).
+SCRIPT="scripts/shader_bench.py"
+if [[ "${1:-}" == "work-skip" ]]; then
+  SCRIPT="scripts/work_skip_bench.py"
+  shift
+fi
+
 if command -v uv >/dev/null 2>&1; then
-  RUN=(uv run --with wgpu --with onnxruntime python scripts/shader_bench.py)
+  RUN=(uv run --with wgpu --with onnxruntime python "$SCRIPT")
 elif ./.venv/bin/python -c "import wgpu" >/dev/null 2>&1; then
   # No uv: only usable if the venv already has wgpu (e.g. a long-lived cluster venv).
-  RUN=(./.venv/bin/python scripts/shader_bench.py)
+  RUN=(./.venv/bin/python "$SCRIPT")
 else
   echo "bench.sh: needs \`uv\` (it pulls wgpu into an ephemeral env) - skipping." >&2
   echo "          pip install wgpu, or add a \`bench\` dependency group and re-run." >&2
