@@ -102,6 +102,10 @@ class Experiment:
     """
 
     name: str = ""
+    # The study this run belongs to (`[sweep] name` in slurm/sweeps/*.toml). Filled
+    # in by `nca.sweep`'s `--set sweep=...`, so `train.json` -- and therefore
+    # `meta.json` -- can answer "which experiment was this?". The picker groups by it.
+    sweep: str | None = None
     # One target = an unconditional model; two or more = a conditional one whose
     # cond_n-way one-hot selects the target.
     targets: tuple[str, ...] = ("emoji:1f980",)

@@ -378,3 +378,17 @@ def test_unverified_reexport_keeps_the_recorded_parity(tmp_path):
     torch.save({"model": ModelSpec(channel_n=8, hidden_n=32).build().state_dict()}, checkpoint)
     export_one(**kwargs, do_verify=False)
     assert json.loads((exports / "tiny" / "meta.json").read_text())["parity_max_abs_diff"] is None
+
+
+def test_derive_targets_prefers_the_records_and_flags():
+    from nca.export.manifest import derive_targets
+
+    recorded = {"targets": ["emoji:1f980", "emoji:1f419"]}
+    # --checkpoint/--id only: the run's own record is the label, not "unknown".
+    assert derive_targets("unknown", None, recorded) == ("emoji:1f980", ["emoji:1f980", "emoji:1f419"])
+    # explicit --targets wins over the record
+    assert derive_targets("shape:heart", ["shape:heart"], recorded)[0] == "shape:heart"
+    # a single-target run has no list: nothing to derive
+    assert derive_targets("unknown", None, {"iterations": 10}) == ("unknown", None)
+    # a rebuild carries no train block but keeps its prior target
+    assert derive_targets("emoji:1f419", None, {}) == ("emoji:1f419", None)

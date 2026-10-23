@@ -34,7 +34,9 @@
 #
 # Scoring: not the training curve (that *is* the loss being changed). Export and
 # compare in the playground, and measure with
-# `python -m scripts.loss_ab --mode repair` for the cheap version.
+# `python -m scripts.loss_ab --mode repair` for the cheap version. The results of
+# the first pass of this sweep are in docs/findings/losses.md; re-score exported
+# runs with `python -m scripts.perc_sweep_eval` (growth + 200 idle steps).
 
 [sweep]
 name = "perceptual"

@@ -20,6 +20,7 @@ from .manifest import (
     _run_train_json,
     _train_block,
     _update_manifest,
+    derive_targets,
     loss_curve,
     reindex,
 )
@@ -90,6 +91,9 @@ def export_one(
         loss = loss_curve(checkpoint.parent)
 
     train_block = _train_block(run or {}, train)
+    # A multi-target run records the whole list; an export of it must not be
+    # labelled "unknown" (see derive_targets).
+    target, targets = derive_targets(target, targets, train_block)
     experiment = experiment or train_block.get("regime") or "unknown"
     spec = ca.spec
     if spec.num_parameters() != ca.num_parameters:
@@ -177,6 +181,11 @@ def export_one(
     }
     if train_block:
         meta["train"] = train_block
+    # The study this model came from (see nca/experiments.py): the picker groups by
+    # it, and it is the only field that says why 13 near-identical models exist.
+    sweep = train_block.get("sweep") or (carry or {}).get("sweep")
+    if sweep:
+        meta["sweep"] = sweep
     # `loss` is the one training artefact the picker shows; a rebuild carries the
     # recorded curve (PRESENTATION_KEYS) since the run's loss.json is gone.
     curve = loss if loss is not None else (carry or {}).get("loss")

@@ -292,7 +292,17 @@ def test_sbatch_command_carries_placement_and_the_run() -> None:
     assert f"--job-name={run.name}" in cmd  # squeue shows the model id
     assert "--partition=mig-priority" in cmd
     assert "--constraint=mig" in cmd
-    assert cmd[-5:] == ["slurm/train.sbatch", "--config", "/abs/cross.toml", "--run", run.name]
+    assert cmd[-7:] == [
+        "slurm/train.sbatch",
+        "--config",
+        "/abs/cross.toml",
+        "--run",
+        run.name,
+        "--set",
+        f"sweep={sweep.name}",
+    ]
+    # The study name has to reach the run: train.json -> meta.sweep -> the picker.
+    assert sweep.name == "crosstarget"  # slurm/sweeps/cross.toml's [sweep] name
 
 
 def test_env_overrides_placement(monkeypatch: pytest.MonkeyPatch) -> None:

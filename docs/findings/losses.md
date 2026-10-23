@@ -102,6 +102,56 @@ answer "is this loss better", because the curve *is* the loss being changed.
 Per-term histories land in `loss_components.json` next to `loss.json`, and the
 training log prints them, so a run's total can always be decomposed.
 
+## The 13-run sweep: what won
+
+`slurm/sweeps/perceptual.toml`, 8000 iterations, `cross8` capacity 128, 8 targets
+on a 72x72 canvas, 2 seeds on the `base` and `t0.5` arms. Scored by
+`scripts/perc_sweep_eval.py` — grow 96 steps from one seed on each run's own
+canvas, then keep stepping 200 more (**idle drift**: a converged, self-healing CA
+must not change when nothing disturbs it):
+
+| variant | psnr | ssim | edge | alpha IoU | drift (iou / edge) |
+|---|---|---|---|---|---|
+| `base` = pixel-only (seed 0 / 1) | **23.27 / 23.39** | .898 / .905 | .866 / .860 | **.855 / .863** | +.013/-.060 · -.032/+.022 |
+| `t0.25` (total weight 0.325) | 22.92 / 22.26 | .919 / .911 | **.791 / .823** | .854 / .831 | -.036/+.065 · -.004/-.027 |
+| `t0.5` (0.65) | 22.61 / 22.77 | .920 / .922 | .803 / .798 | .845 / .851 | -.033/+.046 · -.017/+.010 |
+| `t1.0` (1.30) | 20.86 / 21.68 | .899 / .918 | .913 / .854 | .787 / .819 | -.059/+.023 · -.038/-.060 |
+| `nolap` (ssim+edge only) | 23.19 | **.921** | .812 | .836 | -.037/+.043 |
+| `ssimonly` | 23.01 | **.926** | .819 | .826 | -.031/+.043 |
+| `edgeonly` | 19.48 | .889 | .911 | .827 | -.029/+**.149** |
+| `late` (hold terms to 50%) | 20.85 | .911 | .809 | **.859** | -.008/-.036 |
+| `nosched` (no schedule) | **18.95** | .861 | 1.032 | **.719** | -.096/+.067 |
+
+Reading it:
+
+- **The trade is real but small.** At equal total weight (0.65) the perceptual
+  terms cost ~0.6 dB of composited PSNR and buy +0.02 SSIM and -0.06 relative
+  edge error (sharper structure). PSNR is the metric that dislikes the extra
+  contrast, which is exactly what the pixel loss was already good at.
+- **`t1.0` overshoots**: 2.4 dB of PSNR for no further SSIM, so 0.65 is near the
+  top of the useful range; `t0.25`-`t0.5` bracket the choice.
+- **The schedule is load-bearing.** `nosched` (terms active from step 0) is the
+  worst run in the sweep on every axis: 18.95 psnr, alpha IoU 0.719 — the model
+  learns contrast before it has learned where the creature is. Holding the terms
+  back for the first 20% (`start=0.2`) is not a nicety.
+- **Ablations:** SSIM alone is the strongest single term on SSIM (.926) but the
+  weakest on IoU (.826); the Sobel term alone collapses PSNR (19.48) and drifts
+  *sharper* (+.149 edge). Laplacian is the one that is worth keeping: `nolap`
+  loses .02 alpha IoU versus `t0.5` for no SSIM gain.
+- **Idle drift**: every complete-recipe run moves by <0.04 IoU over 200 idle
+  steps, and `base`/`t0.5`/`t0.25` are within noise of each other. The drift
+  problem the sweep was aimed at is *not* fixed by these terms alone at h=128 —
+  it needs a longer grow (96 steps does not fully converge; `base.s0` still
+  sharpens during the coast).
+
+**Decision: keep `laplacian=0.5, ssim=0.1, edge=0.05, start=0.2, ramp=0.2`** (the
+`t0.5` arm, already the default in `LossConfig`) — and if a future study wants
+PSNR to win, `t0.25` is the knob, not 1.0.
+
+All 13 runs are exported (`exports/cross8.mismatch.h=128.perc.*`, `meta.sweep =
+"perceptual"`) so the playground can show them side by side with the pixel-only
+`base` control.
+
 ## If this is not enough
 
 VGG/LPIPS is the next step and stays behind the same interface (a term in

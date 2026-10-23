@@ -66,7 +66,18 @@ def sbatch_command(
     ]
     if depend:
         cmd.append(f"--dependency=afterany:{depend}")
-    cmd += ["slurm/train.sbatch", "--config", config, "--run", run.name]
+    cmd += [
+        "slurm/train.sbatch",
+        "--config",
+        config,
+        "--run",
+        run.name,
+        # Recorded in the run's train.json, hence in the export's meta.sweep:
+        # otherwise "which study is this model from?" is only recoverable from
+        # the TOML that happened to launch it.
+        "--set",
+        f"sweep={sweep.name}",
+    ]
     return cmd
 
 

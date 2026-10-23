@@ -43,6 +43,24 @@ def _run_train_json(checkpoint: Path) -> dict:
         return {}
 
 
+def derive_targets(
+    target: str, targets: list[str] | None, train_block: dict
+) -> tuple[str, list[str] | None]:
+    """Resolve the target label(s): explicit flags win, else the run's record.
+
+    ``--target`` defaults to ``"unknown"``, and a run that trained on eight
+    targets records all eight in ``train.json``. Exporting such a run with only
+    ``--checkpoint``/``--id`` therefore used to label it ``unknown`` -- which
+    ``scripts/check_meta.py`` rejects (``targets has 1 entries, cond_n is 8``) and
+    which leaves the picker with no thumbnail and no selector labels.
+    """
+    if targets is None and train_block.get("targets"):
+        targets = list(train_block["targets"])
+    if target == "unknown" and targets:
+        target = targets[0]
+    return target, targets
+
+
 def _train_block(run: dict, overrides: dict | None) -> dict:
     """What ``meta.json``'s ``train`` block records about the run.
 
@@ -54,7 +72,7 @@ def _train_block(run: dict, overrides: dict | None) -> dict:
     keys = (
         "regime", "iterations", "targets", "target_size", "padding", "use_pool",
         "damage_n", "noise_n", "noise_std", "mismatch_p", "fire_rate", "unroll",
-        "lr", "seed",
+        "lr", "seed", "sweep",
     )
     block = {k: cfg[k] for k in keys if k in cfg}
     block.update(overrides or {})
