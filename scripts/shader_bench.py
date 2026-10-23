@@ -31,6 +31,7 @@ import wgpu
 
 ROOT = Path(__file__).resolve().parent.parent
 WGSL_DIR = ROOT / "frontend" / "src" / "wgsl"
+VARIANTS_DIR = ROOT / "scripts" / "variants"
 # This script is run as `python scripts/shader_bench.py`, so sys.path[0] is
 # scripts/ -- make the repo importable before reaching for the shared kernels.
 if str(ROOT) not in sys.path:
@@ -82,6 +83,18 @@ def main() -> None:
         "between sessions, see docs/findings/shader-perf.md)",
     )
     ap.add_argument("--reference", action="store_true", help="run the ONNX comparison")
+    ap.add_argument(
+        "--dump",
+        default=None,
+        help="with --reference, write each shader's 1-step output next to the ONNX "
+        "reference into this .npz (parity debugging)",
+    )
+    ap.add_argument(
+        "--diff-channels",
+        action="store_true",
+        help="with --reference, print the 1-step max-abs diff per state channel "
+        "(a parity failure in only some channels points at a layout/grouping bug)",
+    )
     ap.add_argument("--grids", default=None,
                     help="comma-separated grid sizes to sweep, e.g. 72,128,256,512")
     ap.add_argument("--json", default=None, help="write the results to this file")
@@ -166,6 +179,12 @@ def main() -> None:
     # One pipeline per shader: the shipped pass1 ships the shallow and deep update
     # rules as two entry points so neither pays for the other's registers; the
     # scripted variants have a single `main`.
+    def make_pipe(src, entry, constants, layout):
+        module = device.create_shader_module(code=src)
+        return device.create_compute_pipeline(
+            layout=layout, compute={"module": module, "entry_point": entry, "constants": constants}
+        )
+
     def make_pass1(path: Path):
         src, is_shipped = patch_pass1(path)
         module = device.create_shader_module(code=src, label=str(path))
@@ -183,11 +202,25 @@ def main() -> None:
     for path in shader_paths:
         label = path.name if path.parent != WGSL_DIR else "pass1"
         pipe, entry = make_pass1(path)
-        variants.append({"label": label, "path": path, "pipe": pipe, "entry": entry})
-    print("shaders: " + ", ".join(f"{v['label']}({v['entry']})" for v in variants))
+        # A variant may store the state channel-interleaved ("packed"): one cell is
+        # C/4 contiguous vec4 texels instead of C f32s at stride H*W. The bench
+        # packs the seed and unpacks the result, so both layouts are comparable.
+        packed = "state: array<vec4<f32>>" in path.read_text()
+        variants.append({"label": label, "path": path, "pipe": pipe, "entry": entry, "packed": packed})
+    print("shaders: " + ", ".join(
+        f"{v['label']}({v['entry']}{', packed' if v['packed'] else ''})" for v in variants))
     p2 = device.create_compute_pipeline(
         layout=pl2, compute={"module": m2, "entry_point": "main", "constants": const2}
     )
+    # A variant that packs the state needs a pass2 that reads alpha in the same
+    # layout; benchmark a layout with the wrong living mask and every cell dies.
+    pass2_packed = (VARIANTS_DIR / "pass2_packed.wgsl").read_text()
+    p2_packed = device.create_compute_pipeline(
+        layout=pl2, compute={"module": device.create_shader_module(code=pass2_packed),
+                             "entry_point": "main", "constants": const2}
+    )
+    for v in variants:
+        v["pipe2"] = p2_packed if v["packed"] else p2
 
     def bench_grid(grid: int, variants: list) -> dict:
         plane = grid * grid
@@ -200,6 +233,15 @@ def main() -> None:
             b = device.create_buffer(size=max(len(data.tobytes()), 16), usage=usage)
             device.queue.write_buffer(b, 0, data.tobytes())
             return b
+
+        # State layout adapters: planar [C,H,W] <-> packed [(H*W),C] (one cell's C
+        # channels contiguous, i.e. C/4 vec4 texels per cell). Both are the same
+        # bytes in a different order, so a variant can use either in-place.
+        def layout(a, v):
+            return a[0].reshape(C, -1).T.reshape(-1) if v["packed"] else a.reshape(-1)
+
+        def unpack_layout(a, v):
+            return a.reshape(plane, C).T.reshape(1, C, grid, grid) if v["packed"] else a.reshape(1, C, grid, grid)
 
         SRC = wgpu.BufferUsage.COPY_SRC
         stateA = sbuf(seed.reshape(-1), S | D | SRC)
@@ -250,7 +292,9 @@ def main() -> None:
         bgs2 = [bg2(stateA, stateB), bg2(stateB, stateA)]
         dispatch = ((grid + args.covx - 1) // args.covx, (grid + args.covy - 1) // args.covy)
 
-        def run_steps(masks, cur, pipe):
+        def run_steps(masks, cur, v):
+            pipe = v["pipe"]
+            pipe2 = v["pipe2"]
             for m in masks:
                 device.queue.write_buffer(fire, 0, m.tobytes())
                 enc = device.create_command_encoder()
@@ -260,7 +304,7 @@ def main() -> None:
                 pass1.dispatch_workgroups(dispatch[0], dispatch[1])
                 pass1.end()
                 pass2 = enc.begin_compute_pass()
-                pass2.set_pipeline(p2)
+                pass2.set_pipeline(pipe2)
                 pass2.set_bind_group(0, bgs2[cur])
                 pass2.dispatch_workgroups(dispatch[0], dispatch[1])
                 pass2.end()
@@ -290,11 +334,11 @@ def main() -> None:
                     feeds["cond"] = cond_vals.reshape(1, cond_n, 1, 1)
                 return sess.run(["x_next"], feeds)[0]
 
-            def shader_run(nsteps, pipe):
-                device.queue.write_buffer(stateA, 0, seed.reshape(-1).tobytes())
-                cur = run_steps(masks[:nsteps], 0, pipe)
+            def shader_run(nsteps, v):
+                device.queue.write_buffer(stateA, 0, layout(seed, v).tobytes())
+                cur = run_steps(masks[:nsteps], 0, v)
                 got = read_back(device, stateB if cur else stateA, state_nbytes)
-                return got.reshape(1, C, grid, grid)
+                return unpack_layout(got, v)
 
             # 1 step is the definitive check: the CA is chaotic, so a bare fp32
             # rounding difference amplifies ~1.1-1.2x per step over long runs.
@@ -303,16 +347,25 @@ def main() -> None:
             if args.steps > 1:
                 for m in dense_masks[1:]:
                     ref = onnx_step(ref, m)
+            dumps = {"onnx": ref1}
             for v in variants:
-                d1 = float(np.max(np.abs(shader_run(1, v["pipe"]) - ref1)))
+                got1 = shader_run(1, v)
+                d1 = float(np.max(np.abs(got1 - ref1)))
                 v["parity_1step"] = d1
                 print(f"correctness vs ONNX [{v['label']}]: 1 step = {d1:.3e}  "
                       f"[{'ok' if d1 < 1e-4 else 'FAIL'}]")
+                if args.dump:
+                    dumps[f"{v['label']}-1step"] = got1
+                if args.diff_channels:
+                    per = np.abs(got1 - ref1).reshape(C, -1).max(axis=1)
+                    print("    per-channel: " + " ".join(f"{e:.2e}" for e in per))
                 if args.steps > 1:
-                    dn = float(np.max(np.abs(shader_run(args.steps, v["pipe"]) - ref)))
+                    dn = float(np.max(np.abs(shader_run(args.steps, v) - ref)))
                     print(f"                    {args.steps} steps = {dn:.3e}  (amplified by chaos)")
 
-            device.queue.write_buffer(stateA, 0, seed.reshape(-1).tobytes())
+            if args.dump:
+                np.savez(args.dump, **dumps)
+            device.queue.write_buffer(stateA, 0, layout(seed, variants[0]).tobytes())
 
         # ---- benchmark ----------------------------------------------------------
         # Round-robin over the shaders, one repetition each, so slow clock drift hits
@@ -320,8 +373,9 @@ def main() -> None:
         best = {v["label"]: float("inf") for v in variants}
         for _ in range(args.runs):
             for v in variants:
+                device.queue.write_buffer(stateA, 0, layout(seed, v).tobytes())
                 t0 = time.perf_counter()
-                run_steps(masks, 0, v["pipe"])
+                run_steps(masks, 0, v)
                 read_back(device, stateA, state_nbytes)  # drain
                 ms = (time.perf_counter() - t0) / args.steps * 1000
                 best[v["label"]] = min(best[v["label"]], ms)

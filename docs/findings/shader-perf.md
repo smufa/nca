@@ -64,6 +64,7 @@ One interleaved run at 256², 30 steps, current shader as the reference:
 | `pass1_fastperception.wgsl` | 23.64 | 1.42× slower | perception was never the bottleneck (27%), and the hoisted version raises register pressure |
 | `pass1_tiled.wgsl` | 43.73 | 2.63× slower | stages `W1` (32 hidden rows/chunk) and all of `W2` in workgroup memory; the barriers cost far more than the global/L2 traffic they save, because the weight stream was already served from L1 |
 | `pass1_nomlp.wgsl` (probe) | 4.55 | — | not a candidate: measures perception + copy-out alone |
+| `pass1_packed.wgsl` | 15.49 | 1.02× faster | channel-interleaved state (4 channels per `vec4`): correct (2.4e-07), but perception is only 27% of the step and already L1-served, so the layout buys ~2% |
 | `pass1_noperc.wgsl` (probe) | 73.21 | — | invalid probe: without perception the state goes NaN and denormals/NaN handling dominates |
 
 Lessons, in order of how much they cost to learn:
@@ -81,12 +82,13 @@ Lessons, in order of how much they cost to learn:
 
 ## Remaining ideas
 
-1. **Packed state layout** (`[H,W,C/4]` vec4 texels instead of channel-planar
-   `[C,H,W]`) — the Distill texture engine's trick. Every neighbour fetch becomes
-   contiguous and one cell's state is 4 loads instead of 16, but it is an AoS↔SoA
-   change through the export, the shader, the render pass and the brush. Highest
-   headroom of anything left; not started.
-2. **fp16 weights/activations** — the iGPU exposes `shader-f16`; maybe ~2× on the
+0. ~~**Packed state layout**~~ — **measured, not worth it.** `scripts/variants/
+   pass1_packed.wgsl` (+ `pass2_packed.wgsl`: the living mask reads alpha as
+   `(3*H+y)*W+x`, so on a packed buffer every cell silently dies) gives 15.49 vs
+   15.77 ms/step at 256² — ~2%, for an AoS↔SoA change through the engine, the
+   render pass and the brush. The earlier "highest headroom" claim here was a
+   guess; the probe data (MLP ~73%, perception L1-served) already predicted it.
+1. **fp16 weights/activations** — the iGPU exposes `shader-f16`; maybe ~2× on the
    MLP, a real precision risk. The bench settles it in an afternoon.
 3. **GEMM-over-cells** (tile cells into workgroup memory, `W1` as the shared
    operand) — the principled fix for the deep path, and a genuine WGSL matmul

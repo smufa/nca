@@ -466,9 +466,9 @@ supports(spec: ModelSpec): { ok: true } | { ok: false; reason: string }
 
 Each entry lists only what the abstractions above must provide.
 
-### 6a. Bigger grids → the packed state layout
+### 6a. Bigger grids → shader headroom
 
-*Started 2026-02: the first half shipped, the second half is the real work.*
+*Done 2026-02, with a negative result on the part that looked most promising.*
 
 Measured state (interleaved, `docs/findings/shader-perf.md`): 68 ms/step at 512²,
 281 ms at 1024² for `crab.regenerating` — 4 steps/s and 3.5 steps/s, i.e. a 512²
@@ -476,19 +476,23 @@ texture is not interactive and 1024² is not usable. **The prescribed fix in the
 first draft of this plan (tile cells + stage the weights in shared memory) was
 wrong**: implemented and measured, it is 2.6× *slower*, because the weights are
 L1-resident and the barriers cost more than the traffic they save. What did work
-was the entry-point split + explicit ILP (1.35×). What remains is layout, not
-scheduling:
+was the entry-point split + explicit ILP (1.35×).
 
-- **Done:** `--grids a,b,c` + `--json` in `scripts/shader_bench.py`, and `--shader`
-  accepting several files, benchmarked round-robin (the drift fix — see below).
-- **Done:** `step`/`step_deep` split; `HLR`-style deep models no longer run at 2.2×
-  the shallow cost.
-- **Done:** the size constants are already compile-time overrides and stay that
-  way; `--reference` parity is < 3e-07 on all four branch-covering models.
-- **Next (the actual Phase 6a work): packed state.** `[H,W,C/4]` vec4 texels
-  instead of channel-planar `[C,H,W]`, so a cell is 4 loads and its neighbours are
-  contiguous. Touches the shader, `draw.wgsl`, the brush, and pass2's update; the
-  ONNX graph stays `[B,C,H,W]`, so the packing lives in the engine's buffers.
+- **Done:** `--grids a,b,c` + `--json` + `--dump` in `scripts/shader_bench.py`, and
+  `--shader` accepting several files benchmarked round-robin (the ±25% drift fix).
+- **Done:** `step`/`step_deep` split; deep models no longer run at 2.2× the
+  shallow cost.
+- **Done:** the size constants stay compile-time overrides; `--reference` parity is
+  < 3e-07 on all four branch-covering models.
+- **Done and rejected: the packed state layout** (`[H,W,C/4]` vec4 texels).
+  `scripts/variants/pass1_packed.wgsl` + `pass2_packed.wgsl` are correct
+  (2.4e-07) and ~2% faster at 256² (15.49 vs 15.77 ms/step) — perception is only
+  27% of the step and already L1-served, so the engine/render/brush churn an
+  AoS↔SoA change needs buys nothing. The variants stay as the record.
+- **Not started, and now the interesting lever:** fp16 (the iGPU exposes
+  `shader-f16`) and a GEMM-over-cells formulation (give each thread several cells,
+  `W1` as the shared operand) — the MLP is latency-bound, so only changing *how*
+  it is evaluated moves the number.
 - `supports()` still needs a real `maxGridPx` (3 state buffers × `C·H·W·4` bytes:
   200 MB at 1024²/C=16, above the 128 MiB default binding size).
 - No re-export needed (the ONNX graph is shape-agnostic).
