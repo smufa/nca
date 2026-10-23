@@ -25,6 +25,11 @@ source .venv/bin/activate
 # The cluster's Lmod environment injects a Python 3.12 site-packages tree via
 # PYTHONPATH, which shadows the venv's packages (numpy/torch). Drop it.
 unset PYTHONPATH PYTHONHOME
+
+# A `1g.10gb` slice has 9.75 GiB, and a `hidden=256` run sits at ~9.3 GiB, where
+# allocator fragmentation alone is enough to OOM. Expandable segments costs nothing
+# and removes that failure mode (`docs/findings/training-perf.md`).
+export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 
 echo "job ${SLURM_JOB_ID} on $(hostname) | $(date -Is)"

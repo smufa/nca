@@ -4,8 +4,15 @@
 # satisfied by the right amount of ink in roughly the right place. These runs add
 # the Laplacian + SSIM + Sobel terms from `nca/losses.py` to the same objective.
 # Everything else (targets, regime, capacity, schedule, seed) is identical to
-# `cross.toml`'s `cross8.mismatch.h=256`, so every number here is comparable to
+# `cross.toml`'s `cross8.mismatch.h=128`, so every number here is comparable to
 # that export and to each other.
+#
+# Capacity is 128, not 256, because of the memory ceiling: `hidden=256,
+# batch=16, unroll=96` on a 72x72 grid allocates ~9.3 GiB, and a `1g.10gb` MIG
+# slice has 9.75 GiB *shared with whatever else lands on it* -- the h=256 version
+# of this sweep OOMed all 13 jobs within two minutes. The per-term ratios do not
+# depend on width, so pick the ratio here and confirm it once at h=256 with the
+# winner (one job, nothing else on the slice).
 #
 # Why a sweep rather than one hand-picked vector: `LossConfig.normalize` removed
 # the *scale* ambiguity (each term is rescaled so it starts at the pixel loss's
@@ -46,7 +53,7 @@ regime = "regenerating"
 mismatch_p = 0.3
 target_size = 40
 padding = 16
-hidden = 256
+hidden = 128
 batch_size = 16
 iterations = 8000
 unroll = [64, 96]
@@ -64,39 +71,39 @@ targets = [
 # for this ladder -- and two seeds bound the noise the ladder has to clear.
 
 [[run]]
-name = "cross8.mismatch.h=256.perc.base.s0"
+name = "cross8.mismatch.h=128.perc.base.s0"
 
 [[run]]
-name = "cross8.mismatch.h=256.perc.base.s1"
+name = "cross8.mismatch.h=128.perc.base.s1"
 seed = 1
 
 # --- the ladder: one number, two seeds --------------------------------------
 # t<X> = total weight (sum of the three terms), ratio held at 5:1:0.5.
 
 [[run]]
-name = "cross8.mismatch.h=256.perc.t0.25.s0"
+name = "cross8.mismatch.h=128.perc.t0.25.s0"
 loss = { laplacian = 0.25, ssim = 0.05, edge = 0.025, start = 0.2, ramp = 0.2 }
 
 [[run]]
-name = "cross8.mismatch.h=256.perc.t0.25.s1"
+name = "cross8.mismatch.h=128.perc.t0.25.s1"
 seed = 1
 loss = { laplacian = 0.25, ssim = 0.05, edge = 0.025, start = 0.2, ramp = 0.2 }
 
 [[run]]
-name = "cross8.mismatch.h=256.perc.t0.5.s0"
+name = "cross8.mismatch.h=128.perc.t0.5.s0"
 loss = { laplacian = 0.5, ssim = 0.1, edge = 0.05, start = 0.2, ramp = 0.2 }
 
 [[run]]
-name = "cross8.mismatch.h=256.perc.t0.5.s1"
+name = "cross8.mismatch.h=128.perc.t0.5.s1"
 seed = 1
 loss = { laplacian = 0.5, ssim = 0.1, edge = 0.05, start = 0.2, ramp = 0.2 }
 
 [[run]]
-name = "cross8.mismatch.h=256.perc.t1.0.s0"
+name = "cross8.mismatch.h=128.perc.t1.0.s0"
 loss = { laplacian = 1.0, ssim = 0.2, edge = 0.1, start = 0.2, ramp = 0.2 }
 
 [[run]]
-name = "cross8.mismatch.h=256.perc.t1.0.s1"
+name = "cross8.mismatch.h=128.perc.t1.0.s1"
 seed = 1
 loss = { laplacian = 1.0, ssim = 0.2, edge = 0.1, start = 0.2, ramp = 0.2 }
 
@@ -104,25 +111,25 @@ loss = { laplacian = 1.0, ssim = 0.2, edge = 0.1, start = 0.2, ramp = 0.2 }
 
 # No Laplacian pyramid: does the extra scale sensitivity earn its place?
 [[run]]
-name = "cross8.mismatch.h=256.perc.nolap"
+name = "cross8.mismatch.h=128.perc.nolap"
 loss = { laplacian = 0.0, ssim = 0.2, edge = 0.1, start = 0.2, ramp = 0.2 }
 
 # SSIM alone (same total weight).
 [[run]]
-name = "cross8.mismatch.h=256.perc.ssimonly"
+name = "cross8.mismatch.h=128.perc.ssimonly"
 loss = { ssim = 0.5, start = 0.2, ramp = 0.2 }
 
 # Sobel alone: is structure all we needed?
 [[run]]
-name = "cross8.mismatch.h=256.perc.edgeonly"
+name = "cross8.mismatch.h=128.perc.edgeonly"
 loss = { edge = 0.5, start = 0.2, ramp = 0.2 }
 
 # The schedule: hold the terms back for half the run instead of a fifth.
 [[run]]
-name = "cross8.mismatch.h=256.perc.late"
+name = "cross8.mismatch.h=128.perc.late"
 loss = { laplacian = 0.5, ssim = 0.1, edge = 0.05, start = 0.5, ramp = 0.2 }
 
 # No schedule at all: does placement-first actually matter?
 [[run]]
-name = "cross8.mismatch.h=256.perc.nosched"
+name = "cross8.mismatch.h=128.perc.nosched"
 loss = { laplacian = 0.5, ssim = 0.1, edge = 0.05, start = 0.0, ramp = 0.0 }
