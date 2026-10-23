@@ -45,9 +45,10 @@ and no re-export is required. Only Phase 6 (features) changes the graph.
       `docs/findings/{shader-perf,training-perf,capacity,robustness,conditioning,
       frontend-engines}.md` + index; every number moved out.*
       Move the results tables out:
-      - `docs/findings/shader-perf.md` — MLP is 98% of the step, weight-load
-        bound, vec4 3.2–3.6×, the rejected experiments (`perc` shared mem, ILP,
-        wg16, tile2 spill), current 1.54 / 4.40 / 16.8 ms at 72²/128²/256².
+      - `docs/findings/shader-perf.md` — interleaved A/B tables (naive vs current),
+        where the time goes (MLP ~73%, perception ~27%), the rejected variants and
+        *why* they lost, and the rule that two shaders must be measured in one
+        invocation because the iGPU drifts ±25%.
       - `docs/findings/training-perf.md` — throughput-bound table, bf16 1.3–1.55×,
         `torch.compile` no help, memory ~ linear in `batch × train_steps`.
       - `docs/findings/capacity.md` — the 8-row hidden/channel table.
@@ -465,24 +466,38 @@ supports(spec: ModelSpec): { ok: true } | { ok: false; reason: string }
 
 Each entry lists only what the abstractions above must provide.
 
-### 6a. Bigger grids → tiled GEMM in WGSL *(do first)*
+### 6a. Bigger grids → the packed state layout
 
-At 512² the current kernel is ~67 ms/step (16.8 ms at 256², quadratic) ≈ 15
-steps/s. The fix is AGENTS.md's remaining idea #1: tile cells into workgroup
-shared memory and stream the weights once per tile.
+*Started 2026-02: the first half shipped, the second half is the real work.*
 
-- The tile shape must be derived from the spec (`C`, `NP4`, `HG`, `CONDN` stay
-  **compile-time overrides** — dynamic bounds cost ~1.9×).
-- `supports()` needs a `maxGridPx` based on real limits: the shader holds 3 state
-  buffers of `C·H·W·4` bytes (at 1024², C=16: 67 MB each → ~200 MB, above the
-  default 128 MiB `maxStorageBufferBindingSize`).
-- `meta.grid` must stop being read as "the model's grid" (see Phase 0 drift);
-  the grid becomes a UI/capability concern.
-- `scripts/shader_bench.py` gains a `--grids 72,128,256,512,1024` sweep with JSON
-  output so `docs/findings/shader-perf.md` is generated.
-- Variants stay in `scripts/variants/`; promote to `pass1.wgsl` only with
-  1-step `--reference` parity < 1e-5 plus a full size table.
+Measured state (interleaved, `docs/findings/shader-perf.md`): 68 ms/step at 512²,
+281 ms at 1024² for `crab.regenerating` — 4 steps/s and 3.5 steps/s, i.e. a 512²
+texture is not interactive and 1024² is not usable. **The prescribed fix in the
+first draft of this plan (tile cells + stage the weights in shared memory) was
+wrong**: implemented and measured, it is 2.6× *slower*, because the weights are
+L1-resident and the barriers cost more than the traffic they save. What did work
+was the entry-point split + explicit ILP (1.35×). What remains is layout, not
+scheduling:
+
+- **Done:** `--grids a,b,c` + `--json` in `scripts/shader_bench.py`, and `--shader`
+  accepting several files, benchmarked round-robin (the drift fix — see below).
+- **Done:** `step`/`step_deep` split; `HLR`-style deep models no longer run at 2.2×
+  the shallow cost.
+- **Done:** the size constants are already compile-time overrides and stay that
+  way; `--reference` parity is < 3e-07 on all four branch-covering models.
+- **Next (the actual Phase 6a work): packed state.** `[H,W,C/4]` vec4 texels
+  instead of channel-planar `[C,H,W]`, so a cell is 4 loads and its neighbours are
+  contiguous. Touches the shader, `draw.wgsl`, the brush, and pass2's update; the
+  ONNX graph stays `[B,C,H,W]`, so the packing lives in the engine's buffers.
+- `supports()` still needs a real `maxGridPx` (3 state buffers × `C·H·W·4` bytes:
+  200 MB at 1024²/C=16, above the 128 MiB default binding size).
 - No re-export needed (the ONNX graph is shape-agnostic).
+
+**Method warning, learned the hard way:** the iGPU's clock drifts ±25% between
+sessions, so a number measured in one invocation cannot be compared with one
+measured in another. Always `--shader old.wgsl new.wgsl` in a single run. Every
+absolute number in the first draft of `shader-perf.md` was collected that way and
+had to be re-measured.
 
 ### 6b. Textures
 

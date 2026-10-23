@@ -7,50 +7,117 @@ guessing. See the `headless-webgpu` skill for the NixOS/Vulkan setup.
 ```bash
 bash scripts/bench.sh crab.regenerating --steps 150 --reference   # correctness + perf
 bash scripts/bench.sh crab.regenerating --grid 256
-bash scripts/bench.sh crab.regenerating --shader scripts/variants/foo.wgsl
+# several shaders per invocation are benchmarked ROUND-ROBIN -- always do this
+bash scripts/bench.sh crab.regenerating --steps 40 --grids 256,512 \
+    --shader scripts/variants/pass1_head.wgsl frontend/src/wgsl/pass1.wgsl
 ```
 
 `--reference` reports a **1-step** diff as the correctness gate. The N-step diff is
 larger because the CA is chaotic — a 1-step agreement plus a visual check is the
 real signal, not a 100-step max-abs.
 
-## What the step costs (Intel UHD 620)
+## Measure two shaders at a time, or not at all
 
-- The **MLP is ~98%** of the step; perception is ~0.06 ms.
-- It is bound by **weight loads**, not FLOPs.
-- `vec4` weight loads + 4-hidden-at-a-time: **3.2–3.6×** over the naive shader
-  (`frontend/src/wgsl/pass1.wgsl`). Current: **72² 1.54 ms · 128² 4.40 ms ·
-  256² 16.8 ms**.
+The integrated GPU (Intel UHD 620) drifts up to **±25%** between sessions: the same
+unchanged shader measured 13.0 ms and 16.2 ms/step on different runs, and its clock
+depends on what ran before it. Absolute numbers in this file are therefore only
+meaningful next to a reference shader measured **in the same invocation**, which is
+what `--shader a.wgsl b.wgsl` does (one repetition per shader, repeated, best-of-N
+per shader). Ratios reproduce to a few percent; absolute numbers do not.
 
-## Tried and rejected (slower)
+## The step, as measured
 
-| experiment | result |
-|---|---|
-| `perc` in workgroup shared memory | added LDS traffic + cost occupancy; the private array was already in registers |
-| explicit 4-way ILP in the MLP loop | the compiler already schedules it |
-| 16×16 workgroup | worse occupancy than the current size |
-| 2-cell register tiling | register spill → 5.2 ms **and** wrong output |
+`crab.regenerating` (C=16, hidden=128, one layer), 40 steps, interleaved A/B:
 
-They are kept in `scripts/variants/` so the negative results are still runnable.
+| grid | naive (`pass1_head.wgsl`) | current `pass1.wgsl` | speedup |
+|---|---|---|---|
+| 72² | 1.93 ms | 1.49 ms | 1.29× |
+| 128² | 5.92 | 4.36 | 1.36× |
+| 256² | 22.58 | 16.60 | 1.36× |
+| 512² | 93.50 | 68.29 | 1.37× |
+| 1024² | 376.31 | 280.78 | 1.34× |
 
-## Remaining ideas (not tried)
+The speedup is flat in grid size, so it is not about traffic or occupancy — it is
+per-cell instruction latency.
 
-1. **Tiled GEMM for the MLP** — tile cells into shared memory and stream the
-   weights once per tile. The proper fix at 512²+, but a real WGSL matmul project.
-2. **fp16** weights/activations — the iGPU exposes `shader-f16`, maybe ~2×, but a
-   real precision risk. The bench settles it immediately.
-3. **Split hidden units across workgroups** and reduce `dx` with atomics, to cut
-   per-thread weight reads.
+**What that 1.35× is:** splitting the shallow and deep update rules into two entry
+points (`step`, `step_deep`) plus 4-way ILP accumulators in the `W1` loop. The split
+is worth more than the ILP: a single kernel that contains both paths keeps the deep
+path's `h`/`h2` arrays live and runs the whole thing at ~2.2× the shallow cost
+(30.3 vs 13.8 ms/step at 256², measured before the split), because the compiler
+allocates for the worst branch.
+
+**Where the time goes** (256², same session): total 16.63 ms, of which perception +
+copy-out is 4.55 ms (`pass1_nomlp.wgsl`, MLP replaced by a no-op) — so the MLP is
+~73% and perception ~27%. That ratio is the reason the MLP (`W1`: 128×12 `vec4`
+FXPs per cell) is the only place worth optimising.
+
+## Tried and rejected (all slower, all still runnable)
+
+One interleaved run at 256², 30 steps, current shader as the reference:
+
+| variant | ms/step | vs current | why it lost |
+|---|---|---|---|
+| `frontend/src/wgsl/pass1.wgsl` | 16.63 | 1.00× | — |
+| `pass1_fireearly.wgsl` | 18.46 | 1.11× slower | skip the MLP when `fire < 0.5`; half a workgroup takes the copy path while the rest run the full MLP, so nothing is short-circuited and the branch costs more than it saves |
+| `pass1_wg16x16.wgsl` | 22.80 | 1.37× slower | fewer blocks to hide latency |
+| `pass1_fastperception.wgsl` | 23.64 | 1.42× slower | perception was never the bottleneck (27%), and the hoisted version raises register pressure |
+| `pass1_tiled.wgsl` | 43.73 | 2.63× slower | stages `W1` (32 hidden rows/chunk) and all of `W2` in workgroup memory; the barriers cost far more than the global/L2 traffic they save, because the weight stream was already served from L1 |
+| `pass1_nomlp.wgsl` (probe) | 4.55 | — | not a candidate: measures perception + copy-out alone |
+| `pass1_noperc.wgsl` (probe) | 73.21 | — | invalid probe: without perception the state goes NaN and denormals/NaN handling dominates |
+
+Lessons, in order of how much they cost to learn:
+
+- **The weights are L1-resident.** Cutting global weight traffic (tiling, staging)
+  buys nothing; that is the single most surprising result here.
+- **The compiler does not schedule the MLP well on its own.** Explicit
+  accumulate-then-sum ILP is worth ~10%, and it is free.
+- **A branch that skips work must also skip the registers.** Both the fire early-out
+  and the merged deep/shallow kernel lost because the skipped path still shaped
+  register allocation.
+- **Probes need a sanity check.** `noperc` ran 4.4× slower than the full kernel
+  because dropping perception produces NaN state — a probe that changes what the
+  data *is* does not measure what you think.
+
+## Remaining ideas
+
+1. **Packed state layout** (`[H,W,C/4]` vec4 texels instead of channel-planar
+   `[C,H,W]`) — the Distill texture engine's trick. Every neighbour fetch becomes
+   contiguous and one cell's state is 4 loads instead of 16, but it is an AoS↔SoA
+   change through the export, the shader, the render pass and the brush. Highest
+   headroom of anything left; not started.
+2. **fp16 weights/activations** — the iGPU exposes `shader-f16`; maybe ~2× on the
+   MLP, a real precision risk. The bench settles it in an afternoon.
+3. **GEMM-over-cells** (tile cells into workgroup memory, `W1` as the shared
+   operand) — the principled fix for the deep path, and a genuine WGSL matmul
+   project rather than a tweak. The naive version of this idea is the tiling above,
+   which lost; doing it properly means giving each thread several output cells.
+4. **Quantised weights** (`unorm8` + per-tensor scale, as the Distill engine does) —
+   only worth it once `hidden` outgrows L1, i.e. not on these models.
 
 ## The kernel is size-generic, at compile time
 
-`C`, `NP4`, `W1S4` and `HG` are WGSL `override` constants set per pipeline. They
-must stay **compile-time** — dynamic loop bounds cost ~1.9×. `nca/export.py` pads
-each `W1` row from `3C` to `ceil(3C/4)*4` floats so `vec4` loads stay aligned; at
-`C=16` that is a no-op, so old `weights.bin` files are unchanged (at `C=6`, 2 floats
-per row). Supported: `4 ≤ C ≤ 16`, `hidden % 4 == 0` (`ShaderRunner.supports`),
-otherwise the frontend falls back to the WASM engine.
+`C`, `NP4`, `W1S4`, `HG`, `CONDN` and `LH` are WGSL `override` constants set per
+pipeline. They must stay **compile-time** — dynamic loop bounds cost ~1.9×. `LH`
+also selects the entry point: `hidden_layers == 1` uses `step`, deeper models use
+`step_deep`. `nca/export.py` pads each `W1` row from `3C` to `ceil(3C/4)*4` floats
+so `vec4` loads stay aligned; at `C=16` that is a no-op, so old `weights.bin` files
+are unchanged (at `C=6`, 2 floats per row). Supported: `4 ≤ C ≤ 16`,
+`hidden % 4 == 0` (`ShaderRunner.supports`), otherwise the frontend falls back to
+the WASM engine.
 
-Multi-layer MLPs are supported too (`hidden_layers > 1`, `cross8.mismatch.l=2`), but the
-`hidden -> hidden` blocks cost ~2.7× the `W1` work plus register pressure from
-holding the hidden vector: ~98 steps/s vs ~620 for a 128-wide single-layer model.
+Multi-layer MLPs work (`hidden_layers > 1`), but the `hidden -> hidden` blocks cost
+~2.7× the `W1` work plus the register pressure of holding the whole hidden vector:
+14.7 ms/step vs 4.4 for a 128-wide single-layer model at 128². That is what
+`step_deep` exists to contain, and what idea 3 above would fix.
+
+## Correctness across the branches
+
+Checked with `--reference` after the entry-point split (1-step max-abs vs ONNX):
+
+| model | covers | 1-step diff |
+|---|---|---|
+| `crab.regenerating` | C=16, hidden=128, 1 layer, wrap | 1.19e-07 |
+| `crab.regenerating.c=8.h=128` | `NP4 % 4 != 0` (scalar MLP path) | 5.96e-08 |
+| `smile.demo` | zero padding (not toroidal) | 8.94e-08 |
+| `cross8.mismatch.l=2` | `hidden_layers = 2` (`step_deep`) | 2.68e-07 |

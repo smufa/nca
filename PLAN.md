@@ -117,7 +117,8 @@ provenance + tests/CI.
 Next, in rough order:
 
 1. **Larger-grid / texture targets** and the shader headroom that implies
-   (tiled GEMM; `docs/findings/shader-perf.md` lists what was already rejected).
+   (the next lever is the packed state layout, not scheduling;
+   `docs/findings/shader-perf.md` lists what was already rejected and why).
 2. **Timeline scrubber** (ring buffer of snapshots) + per-channel stats over time.
 3. **Perception-view export** — a graph variant that also emits `[state, gx, gy]`.
 4. **Scoring harness** (`nca/score.py`) so the conversion/quality numbers in

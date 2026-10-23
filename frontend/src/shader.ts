@@ -207,11 +207,16 @@ export class ShaderRunner implements CaEngine {
       CONDN: this.condN,
       LH: this.layers,
     };
+    // `pose.wgsl` / `pass2.wgsl` have a single `main`; `pass1.wgsl` splits the
+    // shallow and deep update rules into two entry points so neither pays for the
+    // other's registers.
+    const isStep = src.includes('fn step_deep');
+    const entryPoint = isStep ? (this.meta.hidden_layers > 1 ? 'step_deep' : 'step') : 'main';
     this.pipeline1 = d.createComputePipeline({
       layout: 'auto',
       compute: {
         module: d.createShaderModule({ code: src }),
-        entryPoint: 'main',
+        entryPoint,
         constants,
       },
     });
