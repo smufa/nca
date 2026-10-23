@@ -45,6 +45,7 @@ nca/model.py        NeuralCA (perception, update rule, fire + living masks)
 nca/experiments.py  Experiment + REGIMES: every training default, in one place
 nca/sweep.py        `python -m nca.sweep <toml>`: render one sbatch call per run
 nca/train.py        training loop (sample pool, damage + noise, grad normalisation, resume)
+nca/losses.py       loss terms: pixel MSE + optional laplacian / ssim / edge (calibrated)
 nca/targets.py      target images: emoji / image file / procedural shapes
 nca/export/         export: graph.py (ONNX), verify.py (parity), weights.py, manifest.py, cli.py
 nca/cli.py          `python main.py` entry point (train)
@@ -73,6 +74,7 @@ frontend/src/
 scripts/shader_bench.py   headless GPU correctness/benchmark harness (wgpu-py)
 scripts/check_meta.py     validate exports/*/meta.json against ModelSpec (--fix repairs)
 scripts/variants/*.wgsl   shader experiments (see docs/findings/shader-perf.md)
+scripts/loss_ab.py        A/B a loss vector on one target, scored on held-out metrics
 tests/                    pytest: spec/weights, exporter, meta, experiments, training smoke
 slurm/train.sbatch        one job (sources .venv, unsets PYTHONPATH, pins --constraint=h100)
 slurm/submit_sweep.sh     render a study's jobs: `bash … slurm/sweeps/<study>.toml`
@@ -110,6 +112,8 @@ uv run python -m nca.sample --run runs/cross8.mismatch --cond 3 # conditional mo
 uv run python -m nca.sweep slurm/sweeps/cross.toml --dry-run    # what would sbatch
 uv run python -m pytest -q tests              # the suite (CPU, seconds)
 uv run python -m scripts.check_meta           # exports/*/meta.json vs nca/spec.py
+uv run python main.py --target shape:heart --loss laplacian=0.5 --loss ssim=0.1 \
+    --loss edge=0.05 --loss start=0.2          # perceptual terms (see docs/findings/losses.md)
 
 cd frontend && npm install && npm run dev     # http://localhost:5173
 npm run build                                 # tsc + vite build

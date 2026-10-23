@@ -129,7 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         nargs="*",
         default=None,
-        help="iteration(s) at which to decay the LR (default: 25% of iterations)",
+        help="iteration(s) at which to decay the LR (default: 25%% of iterations)",
     )
     train_.add_argument("--lr-gamma", type=float, default=None, help=f"LR decay factor (default {d.lr_gamma})")
     train_.add_argument("--no-grad-norm", action="store_true")
@@ -173,6 +173,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--save-pool",
         action="store_true",
         help="include the large sample pool in state.pt (exact resume; ~340 MB/ckpt)",
+    )
+    train_.add_argument(
+        "--loss",
+        action="append",
+        default=None,
+        metavar="K=V",
+        help="an extra loss term, e.g. --loss laplacian=0.5 --loss ssim=0.1 "
+        "--loss edge=0.05 --loss start=0.2 (merged over [loss] in a study file)",
     )
     run.add_argument("--no-gif", action="store_true")
     run.add_argument("--gif-steps", type=int, default=None)
@@ -241,6 +249,22 @@ def experiment_for(args: argparse.Namespace) -> Experiment:
                 raise SystemExit(f"--set: unknown field {key!r}; known: {sorted(known)}")
             patch[key] = _coerce(key, raw)
         exp = experiment_from_dict({**exp.as_dict(), **patch})
+
+    if args.loss:
+        # Merge over whatever the study file said, so a sweep states its loss once
+        # and one flag can vary a weight without copying the whole table.
+        from .losses import LossConfig
+
+        merged = {**(base.loss or {})}
+        for item in args.loss:
+            if "=" not in item:
+                raise SystemExit(f"--loss expects KEY=VALUE, got {item!r}")
+            key, raw = item.split("=", 1)
+            try:
+                merged[key] = float(raw)
+            except ValueError:
+                raise SystemExit(f"--loss {key}: {raw!r} is not a number") from None
+        exp = replace(exp, loss=LossConfig.from_dict(merged).as_dict())
 
     if args.run_name:
         exp = replace(exp, name=args.run_name)

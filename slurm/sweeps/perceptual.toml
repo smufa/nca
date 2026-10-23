@@ -1,0 +1,63 @@
+# Perceptual loss: does it actually make the grown pattern sharper?
+#
+# The cross8 capacity runs produce models that are structurally right and
+# visually soft: the pixel MSE is happy with a blurred average of the eight
+# emoji, because the *amount* of ink is correct and its exact placement costs
+# little. These runs add the Laplacian + SSIM + Sobel terms from `nca/losses.py`
+# on top of the same pixel objective, so the only difference from
+# `cross.toml`'s `cross8.mismatch.h=256` is the loss.
+#
+# Weights are *calibrated* at the first step (see `Loss.calibrate`): each term is
+# rescaled so its initial magnitude equals the pixel term's, which makes
+# `laplacian = 0.5` mean "half the pixel error", not "20x the pixel error". The
+# per-run scales land in the run's `loss_calibration.json` and the per-term
+# histories in `loss_components.json`, so the sweeps stay comparable.
+#
+# `start`/`ramp` keep the extra terms off for the first 20% of the run (placement
+# before sharpening): a CA that cannot yet put the shape in the right place gains
+# nothing from a crispness gradient.
+#
+# Compare against the existing `cross8.mismatch.h=256` export: same targets, same
+# regime, same capacity, pixel-only. Read `scripts/loss_ab.py` for the cheap CPU
+# sanity check that motivated these weights.
+
+[sweep]
+name = "perceptual"
+group = "perceptual"
+
+[resources]
+partition = "mig-priority"
+constraint = "mig"
+gres = "gpu:1g.10gb:1"
+time = "02:00:00"
+mem = "16G"
+cpus = 4
+
+[defaults]
+regime = "regenerating"
+mismatch_p = 0.3
+target_size = 40
+padding = 16
+hidden = 256
+batch_size = 16
+iterations = 8000
+unroll = [64, 96]
+log_every = 25
+ckpt_every = 500
+
+[[run]]
+name = "cross8.mismatch.h=256.perc"
+targets = [
+  "emoji:1f980", "emoji:1f419", "emoji:1f996", "emoji:1f422",
+  "emoji:1f335", "emoji:1f344", "emoji:1f41d", "emoji:1f9a9",
+]
+loss = { laplacian = 0.5, ssim = 0.1, edge = 0.05, start = 0.2, ramp = 0.2 }
+
+# Same terms without the Laplacian: is the pyramid doing the work, or is SSIM?
+[[run]]
+name = "cross8.mismatch.h=256.ssim"
+targets = [
+  "emoji:1f980", "emoji:1f419", "emoji:1f996", "emoji:1f422",
+  "emoji:1f335", "emoji:1f344", "emoji:1f41d", "emoji:1f9a9",
+]
+loss = { ssim = 0.5, edge = 0.05, start = 0.2, ramp = 0.2 }

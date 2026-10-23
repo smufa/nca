@@ -9,6 +9,7 @@ Measured results, with the reasoning that produced them. One file per question.
 | [`capacity.md`](capacity.md) | how loss scales with channels/hidden width |
 | [`robustness.md`](robustness.md) | why the kernel lab breaks a plain model, and what training regime fixes it |
 | [`conditioning.md`](conditioning.md) | multi-target models: capacity, `--mismatch-p`, wide vs deep, what the playground can show |
+| [`losses.md`](losses.md) | perceptual loss terms for placed targets: what they measure, why the weights must be calibrated, and the A/B that would settle it |
 | [`frontend-engines.md`](frontend-engines.md) | why there are two engines, why the ORT WebGPU EP was removed, what the brush/sync contract is |
 
 ## Policy

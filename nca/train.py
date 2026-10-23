@@ -16,6 +16,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
+from .losses import Loss
 from .model import NeuralCA
 from .pool import SamplePool
 from .viz import growth_frames, plot_loss, render, save_gif, save_image, tile
@@ -49,6 +50,9 @@ class TrainConfig:
     make_gif: bool = True
     seed: int = 0
     amp: str = "off"  # off | bf16
+    # Extra loss terms (nca/losses.py), as a JSON-safe dict so `asdict(cfg)`
+    # records them in train.json. None = the historical pixel-only MSE.
+    loss: dict | None = None
 
 
 def per_sample_loss(x: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
@@ -83,7 +87,9 @@ def _train_step(
     cfg: TrainConfig,
     masks: torch.Tensor,
     cond: torch.Tensor | None = None,
-) -> tuple[torch.Tensor, torch.Tensor]:
+    criterion: "Loss | None" = None,
+    progress: float = 1.0,
+) -> tuple[torch.Tensor, torch.Tensor, dict[str, float]]:
     """One optimiser step over the unroll. Returns ``(final_state, loss)``.
 
     ``loss`` is detached but **left on the device**: the caller materialises the
@@ -93,7 +99,16 @@ def _train_step(
         device_type="cuda", dtype=torch.bfloat16, enabled=cfg.amp == "bf16"
     ):
         x = forward(x0, masks, cond)
-    loss = loss_fn(x, target)  # fp32, so the reported loss stays comparable
+    # fp32 and outside autocast, so the reported loss stays comparable across runs.
+    if criterion is None:
+        loss = loss_fn(x, target)
+        components: dict[str, float] = {}
+    else:
+        # The criterion reduces per sample (so a term can be inspected per sample);
+        # the optimiser wants one number.
+        loss, parts = criterion(x.float(), target, progress)
+        loss = loss.mean()
+        components = {k: float(v) for k, v in parts.items()}
 
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
@@ -103,7 +118,7 @@ def _train_step(
             norms = torch._foreach_norm(grads)
             torch._foreach_div_(grads, [n + 1e-8 for n in norms])
     optimizer.step()
-    return x.detach(), loss.detach()
+    return x.detach(), loss.detach(), components
 
 
 def _save_resume_state(
@@ -118,6 +133,7 @@ def _save_resume_state(
     losses: list[float],
     pool: SamplePool | None,
     save_pool: bool = False,
+    components: dict[str, list[float]] | None = None,
 ) -> None:
     state = {
         "model": ca.state_dict(),
@@ -125,6 +141,7 @@ def _save_resume_state(
         "scheduler": scheduler.state_dict(),
         "step": step,
         "losses": losses,
+        "loss_components": components or {},
         "rng": {
             "cpu": torch.get_rng_state(),
             "gen": generator.get_state(),
@@ -139,6 +156,21 @@ def _save_resume_state(
     if save_pool and pool is not None:
         state["pool"] = pool.x
     torch.save(state, path)
+
+
+def _save_histories(
+    out_dir: Path, losses: list[float], components: dict[str, list[float]]
+) -> None:
+    """Write ``loss.json`` (the totals, unchanged) plus per-term histories.
+
+    ``loss.json`` stays a flat list of floats: the exporter's curve and every
+    existing tool read it. The terms go beside it, because "the total went down"
+    cannot say whether the perceptual terms pulled their weight or fought the
+    pixel error.
+    """
+    (out_dir / "loss.json").write_text(json.dumps(losses))
+    if components:
+        (out_dir / "loss_components.json").write_text(json.dumps(components, indent=1))
 
 
 def train(
@@ -237,6 +269,10 @@ def train(
             f"model built with cond_n={ca.cond_n} but {n_targets} target(s) given"
         )
 
+    # `None` keeps the exact pixel-only path (and `loss_fn`) for every run that
+    # does not ask for more; the extra terms are additive on top of it.
+    criterion = Loss(cfg.loss) if cfg.loss else None
+
     optimizer = torch.optim.Adam(ca.parameters(), lr=cfg.lr)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(
         optimizer, milestones=list(cfg.lr_milestones), gamma=cfg.lr_gamma
@@ -263,6 +299,7 @@ def train(
         print("note: noise_n > 0 but noise_std is 0; no noise will be applied")
 
     losses: list[float] = []
+    component_history: dict[str, list[float]] = {}
     start_step = 0
     if resume_state is not None:
         state = resume_state
@@ -270,6 +307,9 @@ def train(
         scheduler.load_state_dict(state["scheduler"])
         start_step = int(state.get("step", 0))
         losses = list(state.get("losses", []))
+        component_history = {
+            k: list(v) for k, v in (state.get("loss_components") or {}).items()
+        }
         rng = state.get("rng", {})
         if "cpu" in rng:
             torch.set_rng_state(rng["cpu"])
@@ -298,11 +338,18 @@ def train(
     # Loss values stay as device scalars and are only turned into floats when a
     # log line / checkpoint actually needs them (no per-step sync).
     pending: list[torch.Tensor] = []
+    pending_parts: list[dict[str, float]] = []
 
     def flush_losses() -> None:
         if pending:
             losses.extend(torch.stack(pending).tolist())
             pending.clear()
+        if pending_parts:
+            for key in sorted({k for p in pending_parts for k in p}):
+                component_history.setdefault(key, []).extend(
+                    p.get(key, float("nan")) for p in pending_parts
+                )
+            pending_parts.clear()
 
     for step in range(start_step, cfg.iterations):
         tgt = target
@@ -382,13 +429,37 @@ def train(
             <= ca.fire_rate
         )
 
-        x, loss_t = _train_step(ca, forward, optimizer, x0, tgt, cfg, masks, cond)
+        if criterion is not None and not criterion.calibrated:
+            # Balance the terms against the pixel error *of this run's own states*
+            # (a bold emoji and a faint texture need different raw scales), and
+            # record what the weights ended up meaning.
+            scales = criterion.calibrate(x0, tgt)
+            if scales:
+                note = {k: round(v, 6) for k, v in scales.items()}
+                print(f"loss calibration (pixel/term): {note}", flush=True)
+                (out_dir / "loss_calibration.json").write_text(json.dumps(note, indent=2))
+            criterion.calibrated = True
+
+        x, loss_t, parts = _train_step(
+            ca,
+            forward,
+            optimizer,
+            x0,
+            tgt,
+            cfg,
+            masks,
+            cond,
+            criterion=criterion,
+            progress=step / max(cfg.iterations - 1, 1),
+        )
         scheduler.step()
 
         if pool is not None:
             pool.commit(idx, x, cond)
 
         pending.append(loss_t)
+        if parts:
+            pending_parts.append(parts)
 
         if step % cfg.log_every == 0 or step == cfg.iterations - 1:
             flush_losses()
@@ -397,10 +468,14 @@ def train(
             done = step + 1 - start_step
             rate = done / elapsed if elapsed > 0 else 0.0
             eta = (cfg.iterations - step - 1) / rate if rate > 0 else float("inf")
+            detail = ""
+            if component_history:
+                last = {k: v[-1] for k, v in component_history.items() if v}
+                detail = " | " + " ".join(f"{k} {v:.4f}" for k, v in sorted(last.items()))
             print(
                 f"step {step + 1:6d}/{cfg.iterations} | loss {loss:.6f} "
                 f"| log10 {np.log10(max(loss, 1e-12)):+.3f} "
-                f"| {rate:.2f} it/s | eta {eta / 60:.1f} min",
+                f"| {rate:.2f} it/s | eta {eta / 60:.1f} min{detail}",
                 flush=True,
             )
 
@@ -420,16 +495,18 @@ def train(
             _save_resume_state(
                 out_dir / "state.pt", ca, optimizer, scheduler, generator,
                 gpu_generator, device, step + 1, losses, pool, cfg.save_pool,
+                components=component_history,
             )
-            (out_dir / "loss.json").write_text(json.dumps(losses))
+            _save_histories(out_dir, losses, component_history)
 
     torch.save(ca.state_dict(), out_dir / "ckpt_final.pt")
     flush_losses()
     _save_resume_state(
         out_dir / "state.pt", ca, optimizer, scheduler, generator,
         gpu_generator, device, cfg.iterations, losses, pool, cfg.save_pool,
+        components=component_history,
     )
-    (out_dir / "loss.json").write_text(json.dumps(losses))
+    _save_histories(out_dir, losses, component_history)
     plot_loss(losses, out_dir / "loss.png")
 
     if cfg.make_gif:

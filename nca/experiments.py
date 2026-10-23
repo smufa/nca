@@ -131,6 +131,11 @@ class Experiment:
     # Only meaningful with several targets.
     mismatch_p: float = 0.0
 
+    # Extra loss terms (nca/losses.py). None = pixel-only MSE, the historical
+    # default; a dict of LossConfig keys otherwise. Kept as a dict so a study can
+    # state it in TOML and `as_dict()` records it verbatim.
+    loss: dict[str, Any] | None = None
+
     # Training schedule.
     pool_size: int = 1024
     batch_size: int = 4
@@ -157,6 +162,12 @@ class Experiment:
             )
         if self.unroll[0] > self.unroll[1]:
             raise ValueError(f"unroll={self.unroll}: min > max")
+        if self.loss is not None:
+            # Validate here rather than at the first training step: a typo in a
+            # study file should fail when the sweep is submitted, not an hour in.
+            from .losses import LossConfig
+
+            LossConfig.from_dict(self.loss)
         if not 0.0 <= self.mismatch_p <= 1.0:
             raise ValueError(f"mismatch_p={self.mismatch_p} is not a probability")
 
@@ -223,6 +234,7 @@ class Experiment:
             gif_steps=120,
             seed=self.seed,
             amp=self.amp,
+            loss=self.loss,
         )
 
     def spec(self) -> ModelSpec:
