@@ -123,3 +123,51 @@ Checked with `--reference` after the entry-point split (1-step max-abs vs ONNX):
 | `crab.regenerating.c=8.h=128` | `NP4 % 4 != 0` (scalar MLP path) | 5.96e-08 |
 | `smile.demo` | zero padding (not toroidal) | 8.94e-08 |
 | `cross8.mismatch.l=2` | `hidden_layers = 2` (`step_deep`) | 2.68e-07 |
+
+## fp16: measured, and it is 1.4× *slower* here
+
+The tempting "sacrifice accuracy for speed" switch. Built as
+`scripts/variants/pass1_f16.wgsl` — identical structure to `pass1.wgsl`, but the
+perception vector's `vec4` groups, `W1`, the ReLU'd hidden vector, `W2` and the
+per-channel accumulator are `f16`; the state, the perception convolution and the
+final `state + dx * fire * step` stay `f32`.
+
+Measured on `crab.regenerating` (Intel UHD 620, KBL GT2), 40 steps, best of 3:
+
+| grid | f32 `pass1` | `pass1_f16` | |
+|---|---|---|---|
+| 72² | 1.29 ms | 1.81 ms | **1.40× slower** |
+| 256² | 12.92 ms | 18.58 ms | **1.44× slower** |
+
+The adapter *advertises* `shader-f16` (as do `shader-i16`,
+`texture-format16bit-norm`), and the shader compiles and runs correctly — but on
+Gen9 the Vulkan driver emulates `float16` arithmetic with `float32` conversions,
+so every `dot(vec4<f16>)` becomes a convert + the same f32 dot. Halving the ALU
+width only pays on hardware with native fp16 ALU (Arc, RDNA, Apple); on this iGPU
+the conversions are pure overhead. `scripts/shader_bench.py` now requests
+`shader-f16` when the adapter has it, so the experiment is repeatable.
+
+Accuracy, for the record (`scripts/fp16_drift.py`, 500 steps, fixed fire masks,
+real `weights.bin`, vs the f32 step):
+
+| variant | state max\|Δ\| | render PSNR | alpha IoU |
+|---|---|---|---|
+| f32 + 1e-7 seed noise | 4.1e-06 | 132 dB | 1.0000 |
+| weights f16, f32 accumulate | 3.6e-03 | 75.5 dB | 1.0000 |
+| activations f16, f32 accumulate | 6.7e-04 | 94.1 dB | 1.0000 |
+| all f16, including accumulate | 1.4e-03 at 1 step | — | — |
+| all f16, 500 steps (no living mask, as the bench compares) | **1.07** | — | — |
+
+Two things worth keeping from that table. The CA is **contractive over short
+horizons**: a 1e-7 perturbation reaches only 4.1e-06 after 500 steps, so fp16's
+1e-3 error does not run away on its own. But f16 *accumulation* (12 terms for a
+`W1` row, 128 for `W2`) raises the per-step error to 1.4e-03, and at ~2%/step of
+amplification that saturates at O(1) after 500 steps — the pattern lands on a
+visibly similar but different state. fp16 storage with f32 accumulation is the
+variant that stays within 1e-2; it is also the slowest thing measured here.
+
+Conclusion: do not expose an fp16 toggle on this hardware, and the earlier
+assumption in this file that "the CA is chaotic, so error compounds" was wrong for
+short horizons — it is contractive; what amplifies is the *living-mask threshold*
+once the error reaches ~0.1, which is why the failure mode is a pattern that
+heals into a slightly different pattern rather than a blur.

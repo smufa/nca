@@ -130,7 +130,11 @@ def main() -> None:
 
     # ---- device / pipelines -------------------------------------------------
     adapter = wgpu.gpu.request_adapter_sync(power_preference="high-performance")
-    device = adapter.request_device_sync()
+    # `enable f16` shaders (the fp16 experiment) need the feature requested up
+    # front; asking for it unconditionally would fail on adapters that lack it, so
+    # it is conditional on what the adapter advertises.
+    feats = [wgpu.FeatureName.shader_f16] if wgpu.FeatureName.shader_f16 in adapter.features else []
+    device = adapter.request_device_sync(required_features=feats)
     print(f"adapter: {adapter.info['device']} ({adapter.info['adapter_type']})")
 
     m2 = device.create_shader_module(code=pass2_wgsl)
