@@ -2,7 +2,7 @@
   "id": "crab.regenerating.c=16.h=128",
   "name": "crab.regenerating.c=16.h=128",
   "sweep": "capacity",
-  "created": "2026-10-23T00:29:29",
+  "created": "2026-10-23T13:23:17",
   "channel_n": 16,
   "cond_n": 0,
   "hidden_layers": 1,
@@ -74,5 +74,5 @@
     "count": 8336
   },
   "size_bytes": 38428,
-  "git_rev": "43019bb"
+  "git_rev": "19c32fd"
 }

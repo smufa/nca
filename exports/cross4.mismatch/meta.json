@@ -6,9 +6,10 @@
     "mismatch_p": 0.3,
     "recovered_from": "slurm/submit_crosstarget_sweep.sh (MISMATCH_P default)"
   },
-  "created": "2026-10-22T16:06:43",
+  "created": "2026-10-23T13:24:33",
   "channel_n": 16,
   "cond_n": 4,
+  "hidden_layers": 1,
   "hidden_n": 128,
   "fire_rate": 0.5,
   "learn_perception": false,
@@ -44,6 +45,8 @@
   "num_parameters": 8848,
   "grid": 72,
   "dynamic_shape": true,
+  "target_size": 40,
+  "padding": 16,
   "wrap": true,
   "opset": 19,
   "experiment": "regenerating",
@@ -78,8 +81,5 @@
     "count": 8848
   },
   "size_bytes": 41128,
-  "git_rev": "b58eb80",
-  "hidden_layers": 1,
-  "target_size": 40,
-  "padding": 16
+  "git_rev": "19c32fd"
 }
