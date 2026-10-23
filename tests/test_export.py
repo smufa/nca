@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from nca.export import export_all, reindex, save_weights
+from nca.export import export_all, export_one, reindex, save_weights
+from nca.export.graph import DEFAULT_OPSET
 from nca.spec import ModelSpec, load_model_state
 
 EXPORTS = Path(__file__).resolve().parents[1] / "exports"
@@ -159,14 +160,42 @@ def test_committed_metas_carry_a_sweep():
     assert not missing, f"no sweep recorded: {missing}"
 
 
-def test_export_all_skips_models_without_a_checkpoint(tmp_path, capsys):
+def test_export_all_rebuilds_when_the_checkpoint_is_gone(tmp_path):
+    """A dead run dir is not a reason to skip: the export describes its own model.
+
+    This is the regression guard for the 24 exports whose checkpoint only ever
+    existed in ``/tmp`` -- `--all` used to skip them, which would have made an
+    opset bump impossible to apply.
+    """
+    torch = pytest.importorskip("torch")
+
     exports = tmp_path / "exports"
-    _fake_model(exports, "gone")
-    assert export_all(exports, do_verify=False) == []
-    out = capsys.readouterr().out
-    assert "Skipped 1 model(s)" in out
-    assert "gone" in out
-    # The manifest is still rebuilt, so the UI keeps listing what exists on disk.
+    run = tmp_path / "run"
+    run.mkdir()
+    ca = ModelSpec(channel_n=8, hidden_n=16).build()
+    checkpoint = run / "ckpt_final.pt"
+    torch.save({"model": ca.state_dict()}, checkpoint)
+    (run / "train.json").write_text(json.dumps({"iterations": 10, "regime": "growing"}))
+
+    export_one(
+        checkpoint=checkpoint,
+        model_id="tiny",
+        out_dir=exports,
+        grid=16,
+        dynamic=True,
+        opset=DEFAULT_OPSET,
+        experiment=None,
+        target="unknown",
+        do_verify=False,
+        verify_steps=1,
+    )
+    shipped = (exports / "tiny" / "model.onnx").read_bytes()
+
+    checkpoint.unlink()  # the run directory is gone; only the export remains
+    rebuilt = export_all(exports, do_verify=False)
+
+    assert [m["id"] for m in rebuilt] == ["tiny"]
+    assert (exports / "tiny" / "model.onnx").read_bytes() == shipped
     assert (exports / "manifest.json").exists()
 
 

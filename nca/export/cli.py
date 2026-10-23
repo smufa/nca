@@ -7,6 +7,7 @@ import json
 import time
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from ..spec import ModelSpec
@@ -21,6 +22,7 @@ from .manifest import (
     _update_manifest,
     reindex,
 )
+from .rebuild import model_from_export
 from .verify import verify
 from .weights import save_weights
 from ..viz import render, save_image
@@ -43,6 +45,7 @@ def export_one(
     carry: dict | None = None,
     run: dict | None = None,
     train: dict | None = None,
+    rebuild: bool = False,
 ) -> dict:
     import onnx
     import onnxruntime as ort
@@ -52,19 +55,30 @@ def export_one(
     model_dir = out_dir / model_id
     model_dir.mkdir(parents=True, exist_ok=True)
 
-    # Explicit flag > the run's own train.json > unknown. Deliberately no default:
-    # inventing one is what put target.png on a different canvas than the run.
-    run_size, run_padding = _run_layout(checkpoint)
-    max_size = max_size if max_size is not None else run_size
-    padding = padding if padding is not None else run_padding
+    if rebuild:
+        # No training run needed: the export is self-describing (meta + weights.bin
+        # + the learned kernel, if any). This is the path that keeps the models
+        # re-exportable after their run directories are gone.
+        prior = json.loads((model_dir / "meta.json").read_text())
+        ca = model_from_export(model_dir)
+        max_size = max_size if max_size is not None else prior.get("target_size")
+        padding = padding if padding is not None else prior.get("padding")
+        run = run if run is not None else prior.get("train")
+        experiment = experiment or (run or {}).get("regime") or prior.get("experiment") or "unknown"
+    else:
+        # Explicit flag > the run's own train.json > unknown. Deliberately no default:
+        # inventing one is what put target.png on a different canvas than the run.
+        run_size, run_padding = _run_layout(checkpoint)
+        max_size = max_size if max_size is not None else run_size
+        padding = padding if padding is not None else run_padding
 
-    # The experiment the run recorded (nca/cli.py writes it into train.json), so
-    # a re-export needs no --experiment/--train flags to stay reproducible.
-    run = _run_train_json(checkpoint) if run is None else run
-    train_block = _train_block(run, train)
+        # The experiment the run recorded (nca/cli.py writes it into train.json), so
+        # a re-export needs no --experiment/--train flags to stay reproducible.
+        run = _run_train_json(checkpoint) if run is None else run
+        ca = _load_ca(checkpoint, wrap=wrap)
+
+    train_block = _train_block(run or {}, train)
     experiment = experiment or train_block.get("regime") or "unknown"
-
-    ca = _load_ca(checkpoint, wrap=wrap)
     spec = ca.spec
     if spec.num_parameters() != ca.num_parameters:
         raise RuntimeError(
@@ -72,7 +86,7 @@ def export_one(
             f"but the module has {ca.num_parameters}. nca/spec.py is out of date with "
             f"nca/model.py (a new layer or parameter was added)."
         )
-    target_arr = _find_target(checkpoint, target, max_size, padding)
+    target_arr = _find_target(model_dir if rebuild else checkpoint, target, max_size, padding)
     if grid is None:
         grid = int(target_arr.shape[-1]) if target_arr is not None else 64
 
@@ -110,8 +124,10 @@ def export_one(
         "learn_perception": spec.learn_perception,
         # The [3,3,3] (identity, d/dx, d/dy) kernels in use, flattened. For a
         # --learn-perception model these are the trained ones, so the frontend
-        # must use them (and not the canonical Sobel).
-        "perception_kernel": [round(float(v), 8) for v in ca.kernels().reshape(-1)],
+        # must use them (and not the canonical Sobel). Kept at full float32
+        # precision: rounding them here would make the meta a lossy copy, and
+        # `--rebuild` has to reproduce the model exactly from the export.
+        "perception_kernel": [float(np.float32(v)) for v in ca.kernels().detach().reshape(-1)],
         "num_parameters": spec.num_parameters(),
         "grid": grid,
         "dynamic_shape": dynamic,
@@ -157,19 +173,24 @@ def export_all(
     do_verify: bool = True,
     verify_steps: int = 8,
     only: list[str] | None = None,
+    rebuild: bool = False,
 ) -> list[dict]:
-    """Re-export every model in ``out_dir`` that still has its source checkpoint.
+    """Re-export every model in ``out_dir``, from its checkpoint or its own export.
 
     Grid / dynamic shape / experiment / target are taken from the existing
-    ``meta.json`` so a re-export reproduces the same artefacts from the
-    checkpoint. This is the command to run after any change to ``nca/model.py``
-    or ``nca/export``; it then rewrites ``manifest.json`` via ``reindex`` so the
-    manifest cannot drift.
+    ``meta.json`` so a re-export reproduces the same artefacts. This is the
+    command to run after any change to ``nca/model.py`` or ``nca/export``; it
+    then rewrites ``manifest.json`` via ``reindex`` so the manifest cannot drift.
+
+    ``rebuild=True`` ignores the recorded ``source_checkpoint`` and rebuilds each
+    model from its committed ``meta.json`` + ``weights.bin`` (see
+    :mod:`nca.export.rebuild`), which is what makes the exports re-exportable
+    once the run directories are gone.
     """
     out_dir = Path(out_dir)
     wanted = set(only) if only else None
     exported: list[dict] = []
-    skipped: list[tuple[str, str]] = []
+    from_export: list[str] = []
 
     for meta_path in sorted(out_dir.glob("*/meta.json")):
         meta = json.loads(meta_path.read_text())
@@ -177,9 +198,11 @@ def export_all(
         if wanted is not None and model_id not in wanted:
             continue
         checkpoint = Path(meta.get("source_checkpoint") or "")
-        if not checkpoint.is_file():
-            skipped.append((model_id, str(checkpoint)))
-            continue
+        # Not an error: the export describes its model completely, so a run that is
+        # gone (cluster scratch, /tmp, a reboot) is not a reason to skip a model.
+        rebuild_this = rebuild or not checkpoint.is_file()
+        if rebuild_this and not rebuild:
+            from_export.append(model_id)
         spec = ModelSpec.from_meta(meta)
         exported.append(
             export_one(
@@ -200,13 +223,15 @@ def export_all(
                 max_size=meta.get("target_size"),
                 padding=meta.get("padding"),
                 carry=_carry_over(meta),
+                rebuild=rebuild_this,
             )
         )
 
-    if skipped:
-        print(f"\nSkipped {len(skipped)} model(s) whose source checkpoint is gone:")
-        for model_id, path in skipped:
-            print(f"  {model_id}: {path or '(not recorded)'}")
+    if from_export:
+        print(
+            f"\nRebuilt {len(from_export)} model(s) from their own export "
+            f"(source checkpoint gone): {', '.join(from_export)}"
+        )
 
     reindex(out_dir)
     print(f"\nExported {len(exported)} model(s) into {out_dir}")
@@ -234,7 +259,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--all",
         action="store_true",
-        help="re-export every model in --out whose source checkpoint still exists",
+        help="re-export every model in --out (from its checkpoint, or from its own "
+        "export when the run is gone)",
     )
     p.add_argument(
         "--only",
@@ -247,6 +273,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--reindex",
         action="store_true",
         help="rebuild manifest.json from */meta.json and exit",
+    )
+    p.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="re-export from the committed export itself (meta.json + weights.bin) "
+        "instead of the training checkpoint -- works after the run dir is gone. "
+        "With --all it rebuilds every model; with --checkpoint exports/<id> (or "
+        "--id) it rebuilds one",
     )
     p.add_argument("--grid-size", type=int, default=None, help="dummy grid size")
     p.add_argument(
@@ -348,6 +382,32 @@ def main(argv: list[str] | None = None) -> None:
             do_verify=not args.no_verify,
             verify_steps=args.verify_steps,
             only=args.only,
+            rebuild=args.rebuild,
+        )
+        return
+
+    if args.rebuild:
+        # `--checkpoint exports/<id> --rebuild`, or `--id <id> --rebuild`.
+        model_dir = Path(args.checkpoint) if args.checkpoint else Path(args.out) / (args.id or "")
+        if not (model_dir / "meta.json").is_file():
+            parser.error(f"--rebuild needs an export directory with meta.json (got {model_dir})")
+        export_one(
+            checkpoint=model_dir,
+            model_id=args.id or model_dir.name,
+            out_dir=Path(args.out),
+            grid=args.grid_size,
+            dynamic=not args.static,
+            opset=args.opset,
+            experiment=args.experiment,
+            target=args.target,
+            do_verify=not args.no_verify,
+            verify_steps=args.verify_steps,
+            wrap=not args.no_wrap,
+            targets=args.targets,
+            max_size=args.target_size,
+            padding=args.padding,
+            train=_parse_train(args.train),
+            rebuild=True,
         )
         return
 

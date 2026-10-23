@@ -98,7 +98,11 @@ uv run python main.py --config slurm/sweeps/capacity.toml \
     --run crab.regenerating.c=8.h=128 --set lr=1e-3                # file < flags < --set
 uv run python -m nca.export --checkpoint runs/.../ckpt_final.pt \
     --id NAME --target "emoji:1f980"                             # verifies parity
-uv run python -m nca.export --all            # re-export every model that has its checkpoint
+uv run python -m nca.export --all            # re-export every model (falls back to
+the export itself when its run is gone)
+uv run python -m nca.export --all --rebuild  # ignore the checkpoints, rebuild from
+exports/<id>/{meta.json,weights.bin}
+uv run python -m nca.export --checkpoint exports/crab.regenerating --rebuild  # one model
 uv run python -m nca.export --reindex        # rebuild manifest.json from exports/*/meta.json
 uv run python -m nca.export --reindex --refresh-targets  # also re-render target.png/npy
 uv run python -m nca.sample --run runs/NAME --steps 300         # shape from spec.json
@@ -151,7 +155,9 @@ weights.bin,target.png}`, updates `manifest.json`) → `scripts/check_meta.py` �
 `bash scripts/bench.sh <model> --reference` (correctness + perf) → `npm run build`.
 
 **Change the model**: edit `nca/model.py` → `nca.export --all` **and re-verify**
-(parity ~1e-6) → `npm run build`.
+(parity ~1e-6) → `npm run build`. The exports do not depend on the training runs:
+`nca/export/rebuild.py` reconstructs a module from `meta.json` + `weights.bin` (+ the
+learned kernel), which is what `--rebuild` and the `--all` fallback use.
 
 ## Status
 

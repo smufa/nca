@@ -205,11 +205,15 @@ Three bugs/pitfalls found on the way — all fixed or noted:
    Stayed invisible because every recent run was either conditional or batch 1.
 2. **`export_batch`/variants metas keep only `experiment`**, not the full
    provenance, and 24 of the 45 checkpoints live in `/tmp` (`sweep_runs/*`,
-   `crab_regen/*`) — `--all` skips those by design, but they should be moved into
-   the repo (or `runs/`) before `/tmp` is wiped. `meta.json` records
-   `source_checkpoint`, and the run directory beside it is self-describing
-   (`spec.json` + `train.json`), so a re-export is reproducible from the run dir
-   alone -- as long as the run dir survives.
+   `crab_regen/*`) — `--all` used to *skip* those. **Fixed:** an export is a
+   complete description of its model, and `nca/export/rebuild.py` proves it —
+   `ModelSpec.state_from_weights` (the inverse of the blob layout) plus the
+   learned kernel from `meta.perception_kernel` rebuild the module with no
+   checkpoint at all. `nca.export --all` now falls back to it automatically
+   (`--rebuild` forces it), and all 45 exports re-export byte-identically with
+   every `source_checkpoint` pointed at a nonexistent path. The run dirs are
+   still worth keeping (`--save-pool` resume, `loss.json`), just no longer
+   load-bearing.
 3. **Resuming does not restore the sample pool unless `--save-pool` was used**
    (`nca/train.py:130-136`: the pool is ~340 MB at the paper size, so keeping it
    is opt-in and resume prints "no pool in resume state; restarting the pool").

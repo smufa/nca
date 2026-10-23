@@ -178,6 +178,48 @@ class ModelSpec:
         """Total float count of ``weights.bin`` (padding included)."""
         return self.weight_offsets()["b2"] + self.channel_n
 
+    def state_from_weights(self, blob: Any) -> dict[str, Any]:
+        """Decode a ``weights.bin`` blob back into the update rule's parameters.
+
+        The exact inverse of :meth:`weight_offsets` (plus the ``W1`` row padding),
+        and deliberately the *only* implementation of that inverse: an export is
+        supposed to be a complete description of its model, and this is what makes
+        that true after the training run is gone.
+
+        Returns numpy arrays keyed like ``NeuralCA.state_dict()`` (``update.N.*``);
+        the caller wraps them in torch. Raises if the padding is not zero, because
+        that means the blob was not written by :func:`nca.export.weights.save_weights`.
+        """
+        import numpy as np
+
+        blob = np.asarray(blob, dtype="<f4").reshape(-1)
+        if blob.size != self.weights_count():
+            raise ValueError(
+                f"weights.bin has {blob.size} floats, spec says {self.weights_count()} "
+                f"({self.channel_n} channels, hidden {self.hidden_n}, "
+                f"{self.hidden_layers} layers, cond_n {self.cond_n})"
+            )
+        h, p, p4, c = self.hidden_n, self.perception_n, self.perception_padded_n, self.channel_n
+        off = self.weight_offsets()
+        w1 = blob[off["w1"] : off["w1"] + h * p4].reshape(h, p4)
+        if p4 != p and np.any(w1[:, p:] != 0):
+            raise ValueError(
+                f"weights.bin row padding is not zero ({p4 - p} floats per row): "
+                "this blob was not written by save_weights, so it cannot be decoded"
+            )
+        last = 2 * self.hidden_layers
+        state: dict[str, Any] = {
+            "update.0.weight": w1[:, :p].reshape(h, p, 1, 1).copy(),
+            "update.0.bias": blob[off["b1"] : off["b1"] + h].copy(),
+        }
+        for li in range(1, self.hidden_layers):
+            base = off["wmid"] + (li - 1) * off["mid_stride"]
+            state[f"update.{2 * li}.weight"] = blob[base : base + h * h].reshape(h, h, 1, 1).copy()
+            state[f"update.{2 * li}.bias"] = blob[base + h * h : base + h * h + h].copy()
+        state[f"update.{last}.weight"] = blob[off["w2"] : off["w2"] + c * h].reshape(c, h, 1, 1).copy()
+        state[f"update.{last}.bias"] = blob[off["b2"] : off["b2"] + c].copy()
+        return state
+
     def weights_meta(self, file: str = "weights.bin") -> dict[str, Any]:
         """The ``meta.json`` ``weights`` block for this spec."""
         return {
