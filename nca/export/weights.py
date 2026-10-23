@@ -14,7 +14,7 @@ import torch
 from ..model import NeuralCA
 from ..spec import ModelSpec
 
-def _save_weights(ca: NeuralCA, model_dir: Path, spec: ModelSpec) -> dict:
+def save_weights(ca: NeuralCA, model_dir: Path, spec: ModelSpec) -> dict:
     """Dump the update-rule MLP as a flat float32 blob for the WGSL engine.
 
     The layout is owned by ``ModelSpec.weight_offsets()`` (see there for the block

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from nca.export import _save_weights, export_all, reindex
+from nca.export import export_all, reindex, save_weights
 from nca.spec import ModelSpec, load_model_state
 
 EXPORTS = Path(__file__).resolve().parents[1] / "exports"
@@ -54,7 +54,7 @@ def _state_from_onnx(model_dir: Path) -> dict:
 
 @pytest.mark.parametrize(("model_id", "meta"), META, ids=META_IDS)
 def test_committed_blob_is_a_repack_of_the_committed_graph(model_id, meta, tmp_path):
-    """``weights.bin`` == ``_save_weights(graph weights)``, without the run dir."""
+    """``weights.bin`` == ``save_weights(graph weights)``, without the run dir."""
     torch = pytest.importorskip("torch")
     pytest.importorskip("onnx")
 
@@ -66,7 +66,7 @@ def test_committed_blob_is_a_repack_of_the_committed_graph(model_id, meta, tmp_p
     assert not unexpected, f"{model_id}: unexpected keys {unexpected}"
     assert set(missing) <= {"sobel"}, f"{model_id}: keys missing from the graph: {missing}"
 
-    _save_weights(ca, tmp_path, spec)
+    save_weights(ca, tmp_path, spec)
     rebuilt = (tmp_path / "weights.bin").read_bytes()
     shipped = (EXPORTS / model_id / "weights.bin").read_bytes()
     assert rebuilt == shipped, f"{model_id}: weights.bin is not a repack of model.onnx"
@@ -82,7 +82,7 @@ def test_save_weights_reproduces_committed_blob(model_id, meta, tmp_path):
     spec = ModelSpec.from_meta(meta)
     ca = spec.build()
     ca.load_state_dict(load_model_state(checkpoint))
-    _save_weights(ca, tmp_path, spec)
+    save_weights(ca, tmp_path, spec)
 
     rebuilt = (tmp_path / "weights.bin").read_bytes()
     shipped = (EXPORTS / model_id / "weights.bin").read_bytes()

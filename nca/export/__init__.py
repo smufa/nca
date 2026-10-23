@@ -36,13 +36,13 @@ from .graph import (
 )
 from .manifest import PRESENTATION_KEYS, reindex
 from .verify import verify
-from .weights import _save_weights
+from .weights import save_weights
 
 __all__ = [
     "DEFAULT_OPSET",
     "ExportStep",
     "PRESENTATION_KEYS",
-    "_save_weights",
+    "save_weights",
     "build_parser",
     "export_all",
     "export_one",

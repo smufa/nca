@@ -22,7 +22,7 @@ from .manifest import (
     reindex,
 )
 from .verify import verify
-from .weights import _save_weights
+from .weights import save_weights
 from ..viz import render, save_image
 
 def export_one(
@@ -94,7 +94,7 @@ def export_one(
     if target_arr is not None:
         save_image(render(torch.from_numpy(target_arr))[0], model_dir / "target.png")
 
-    weight_layout = _save_weights(ca, model_dir, spec)
+    weight_layout = save_weights(ca, model_dir, spec)
 
     model_proto = onnx.load(str(onnx_path))
     meta = {

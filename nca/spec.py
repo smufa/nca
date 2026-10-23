@@ -157,7 +157,7 @@ class ModelSpec:
             W_out [C, hidden], b_out [C]
 
         Key order matters only for readability; the values must match
-        ``NeuralCA``'s parameter order, which is what ``_save_weights`` writes.
+        ``NeuralCA``'s parameter order, which is what ``save_weights`` writes.
         """
         h = self.hidden_n
         p4 = self.perception_padded_n
