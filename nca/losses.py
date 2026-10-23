@@ -147,11 +147,17 @@ class Loss:
         if not (cfg.normalize and cfg.uses_perception):
             self.calibrated = True
             return {}
-        _, components = self._evaluate(x.detach(), target)
-        pixel = float(components.get("pixel", 0.0)) or 1e-8
+        # `_evaluate` returns *per-sample* terms ([B]); calibration wants their mean,
+        # which is also what the logged components report. (Getting this wrong only
+        # shows up with batch > 1, which is why it is covered by a test now.)
+        _, raw = self._evaluate(x.detach(), target)
+        pixel = float(raw["pixel"].mean()) or 1e-8
         for term in TERMS[1:]:
-            if term in components and components[term] > 0:
-                self._norm[term] = pixel / float(components[term])
+            if term not in raw:
+                continue
+            magnitude = float(raw[term].mean())
+            if magnitude > 0:
+                self._norm[term] = pixel / magnitude
         self.calibrated = True
         return dict(self._norm)
 

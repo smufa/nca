@@ -204,3 +204,31 @@ def test_experiment_validates_the_loss_table():
 def test_pixel_only_loss_fn_is_untouched():
     x, target = _state(dx=2.0), _rgba()
     assert torch.allclose(loss_fn(x, target), per_sample_loss(x, target).mean())
+
+
+def test_calibration_balances_terms_for_a_batch():
+    """The scales must equalise each term's *initial* magnitude against the pixel loss.
+
+    Regression: `calibrate` used per-sample terms as if they were scalars, which
+    only raised with batch > 1 (found by the first cluster job, not by the tests).
+    """
+    cfg = LossConfig(laplacian=0.5, ssim=0.1, edge=0.05)
+    criterion = Loss(cfg)
+    x = torch.cat([_state(dx=d) for d in (0.0, 2.0, 4.0, 6.0)])
+    target = _rgba().expand(4, -1, -1, -1)
+    scales = criterion.calibrate(x, target)
+    assert set(scales) == {"laplacian", "ssim", "edge"}
+    assert all(v > 0 and v == v for v in scales.values())
+
+    # After calibration the *weights* are comparable to the pixel loss: with all
+    # three terms at their configured weights the extra part is a modest multiple.
+    _, raw = criterion._evaluate(x, target)
+    pixel = float(raw["pixel"].mean())
+    for term, weight in (("laplacian", 0.5), ("ssim", 0.1), ("edge", 0.05)):
+        assert abs(weight * scales[term] * float(raw[term].mean()) / pixel - weight) < 1e-4
+
+
+def test_calibration_is_skipped_when_normalize_is_off():
+    criterion = Loss(LossConfig(laplacian=0.5, normalize=False))
+    assert criterion.calibrate(_state(), _rgba()) == {}
+    assert criterion._norm == {}

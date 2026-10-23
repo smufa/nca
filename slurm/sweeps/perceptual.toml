@@ -1,25 +1,33 @@
-# Perceptual loss: does it actually make the grown pattern sharper?
+# Perceptual loss: how heavy should the extra terms be?
 #
-# The cross8 capacity runs produce models that are structurally right and
-# visually soft: the pixel MSE is happy with a blurred average of the eight
-# emoji, because the *amount* of ink is correct and its exact placement costs
-# little. These runs add the Laplacian + SSIM + Sobel terms from `nca/losses.py`
-# on top of the same pixel objective, so the only difference from
-# `cross.toml`'s `cross8.mismatch.h=256` is the loss.
+# The cross8 capacity runs are structurally right and visually soft: pixel MSE is
+# satisfied by the right amount of ink in roughly the right place. These runs add
+# the Laplacian + SSIM + Sobel terms from `nca/losses.py` to the same objective.
+# Everything else (targets, regime, capacity, schedule, seed) is identical to
+# `cross.toml`'s `cross8.mismatch.h=256`, so every number here is comparable to
+# that export and to each other.
 #
-# Weights are *calibrated* at the first step (see `Loss.calibrate`): each term is
-# rescaled so its initial magnitude equals the pixel term's, which makes
-# `laplacian = 0.5` mean "half the pixel error", not "20x the pixel error". The
-# per-run scales land in the run's `loss_calibration.json` and the per-term
-# histories in `loss_components.json`, so the sweeps stay comparable.
+# Why a sweep rather than one hand-picked vector: `LossConfig.normalize` removed
+# the *scale* ambiguity (each term is rescaled so it starts at the pixel loss's
+# magnitude, so a weight is a fraction of it), but not the trade-off. The one CPU
+# measurement we have -- 200 iterations, one seed, restore an erased disc -- says a
+# total weight of ~0.65 costs ~2 dB of PSNR and wins on SSIM/edge/IoU
+# (docs/findings/losses.md). Two hundred iterations is not evidence about an
+# 8000-iteration attractor, and the difference is small enough that the seed could
+# be doing the work. So: a weight ladder with two seeds each, plus ablations.
 #
-# `start`/`ramp` keep the extra terms off for the first 20% of the run (placement
-# before sharpening): a CA that cannot yet put the shape in the right place gains
-# nothing from a crispness gradient.
+# The internal ratio stays fixed at laplacian:ssim:edge = 5:1:0.5 (the calibrated
+# "structure, then contrast, then edges" balance) so the ladder varies one number,
+# not five. The ablations then ask what is actually doing the work.
 #
-# Compare against the existing `cross8.mismatch.h=256` export: same targets, same
-# regime, same capacity, pixel-only. Read `scripts/loss_ab.py` for the cheap CPU
-# sanity check that motivated these weights.
+# Placement: `gpu` (full H100) is usually fully allocated, so this runs on the
+# MIG partition -- gwn07 exposes 14 independent `1g.10gb` slices, i.e. the whole
+# sweep is one queue wait, and 8000 iterations of this size takes ~1-2 h per
+# slice. 13 runs, 14 slices, nothing queued behind anything.
+#
+# Scoring: not the training curve (that *is* the loss being changed). Export and
+# compare in the playground, and measure with
+# `python -m scripts.loss_ab --mode repair` for the cheap version.
 
 [sweep]
 name = "perceptual"
@@ -29,7 +37,7 @@ group = "perceptual"
 partition = "mig-priority"
 constraint = "mig"
 gres = "gpu:1g.10gb:1"
-time = "02:00:00"
+time = "03:30:00"
 mem = "16G"
 cpus = 4
 
@@ -44,20 +52,77 @@ iterations = 8000
 unroll = [64, 96]
 log_every = 25
 ckpt_every = 500
-
-[[run]]
-name = "cross8.mismatch.h=256.perc"
+seed = 0
 targets = [
   "emoji:1f980", "emoji:1f419", "emoji:1f996", "emoji:1f422",
   "emoji:1f335", "emoji:1f344", "emoji:1f41d", "emoji:1f9a9",
 ]
+
+# --- control: the historical pixel-only objective, twice ---------------------
+# Re-run rather than reuse `cross8.mismatch.h=256`: the defaults have drifted
+# since (unroll, batch, milestones), so a fresh control is the only clean baseline
+# for this ladder -- and two seeds bound the noise the ladder has to clear.
+
+[[run]]
+name = "cross8.mismatch.h=256.perc.base.s0"
+
+[[run]]
+name = "cross8.mismatch.h=256.perc.base.s1"
+seed = 1
+
+# --- the ladder: one number, two seeds --------------------------------------
+# t<X> = total weight (sum of the three terms), ratio held at 5:1:0.5.
+
+[[run]]
+name = "cross8.mismatch.h=256.perc.t0.25.s0"
+loss = { laplacian = 0.25, ssim = 0.05, edge = 0.025, start = 0.2, ramp = 0.2 }
+
+[[run]]
+name = "cross8.mismatch.h=256.perc.t0.25.s1"
+seed = 1
+loss = { laplacian = 0.25, ssim = 0.05, edge = 0.025, start = 0.2, ramp = 0.2 }
+
+[[run]]
+name = "cross8.mismatch.h=256.perc.t0.5.s0"
 loss = { laplacian = 0.5, ssim = 0.1, edge = 0.05, start = 0.2, ramp = 0.2 }
 
-# Same terms without the Laplacian: is the pyramid doing the work, or is SSIM?
 [[run]]
-name = "cross8.mismatch.h=256.ssim"
-targets = [
-  "emoji:1f980", "emoji:1f419", "emoji:1f996", "emoji:1f422",
-  "emoji:1f335", "emoji:1f344", "emoji:1f41d", "emoji:1f9a9",
-]
-loss = { ssim = 0.5, edge = 0.05, start = 0.2, ramp = 0.2 }
+name = "cross8.mismatch.h=256.perc.t0.5.s1"
+seed = 1
+loss = { laplacian = 0.5, ssim = 0.1, edge = 0.05, start = 0.2, ramp = 0.2 }
+
+[[run]]
+name = "cross8.mismatch.h=256.perc.t1.0.s0"
+loss = { laplacian = 1.0, ssim = 0.2, edge = 0.1, start = 0.2, ramp = 0.2 }
+
+[[run]]
+name = "cross8.mismatch.h=256.perc.t1.0.s1"
+seed = 1
+loss = { laplacian = 1.0, ssim = 0.2, edge = 0.1, start = 0.2, ramp = 0.2 }
+
+# --- ablations at t0.5, one seed: which term is doing the work? --------------
+
+# No Laplacian pyramid: does the extra scale sensitivity earn its place?
+[[run]]
+name = "cross8.mismatch.h=256.perc.nolap"
+loss = { laplacian = 0.0, ssim = 0.2, edge = 0.1, start = 0.2, ramp = 0.2 }
+
+# SSIM alone (same total weight).
+[[run]]
+name = "cross8.mismatch.h=256.perc.ssimonly"
+loss = { ssim = 0.5, start = 0.2, ramp = 0.2 }
+
+# Sobel alone: is structure all we needed?
+[[run]]
+name = "cross8.mismatch.h=256.perc.edgeonly"
+loss = { edge = 0.5, start = 0.2, ramp = 0.2 }
+
+# The schedule: hold the terms back for half the run instead of a fifth.
+[[run]]
+name = "cross8.mismatch.h=256.perc.late"
+loss = { laplacian = 0.5, ssim = 0.1, edge = 0.05, start = 0.5, ramp = 0.2 }
+
+# No schedule at all: does placement-first actually matter?
+[[run]]
+name = "cross8.mismatch.h=256.perc.nosched"
+loss = { laplacian = 0.5, ssim = 0.1, edge = 0.05, start = 0.0, ramp = 0.0 }
