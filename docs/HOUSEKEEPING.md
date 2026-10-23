@@ -546,18 +546,20 @@ Invariants that must survive:
 
 ## Definition of done (housekeeping)
 
-- [ ] `AGENTS.md` ≤ 150 lines, orientation only; every measurement lives in
-      `docs/findings/` and is regenerable by a command.
-- [ ] `PLAN.md` no longer describes removed engines.
-- [ ] No `_infer_dims`; `nca.sample` works on all 45 exports.
-- [ ] One naming convention, enforced by a test; the picker groups from
+- [x] `AGENTS.md` ≤ 150 lines, orientation only; every measurement lives in
+      `docs/findings/` and is regenerable by a command (`scripts/bench.sh`).
+- [x] `PLAN.md` no longer describes removed engines.
+- [x] No `_infer_dims`; `nca.sample` works on all 45 exports.
+- [x] One naming convention, enforced by a test; the picker groups from
       `meta.sweep`, not from regexes over ids.
-- [ ] One `slurm/submit_sweep.sh` + TOML sweeps.
-- [ ] `pytest` (5 files) + `node --test` + `tsc --noEmit` in CI; `verify.sh` stays
-      as the GPU-inclusive check.
-- [ ] `meta.schema.json` validates all exports; `export --all` reproduces parity.
-- [ ] `export --reindex` can rebuild `manifest.json` from the metas.
-- [ ] `nca/step.py` and `nca/spec.py` exist; `nca.ts` mirrors them with a test
+- [x] One `slurm/submit_sweep.sh` + TOML sweeps.
+- [x] `pytest` + `tsc --noEmit` + `vite build` in CI; `verify.sh` stays as the
+      GPU-inclusive check. (The `nca.ts` drift check is a *pytest* reading the `.ts`
+      source, not `node --test`: it needs no TS build step, so CI cannot skip it.)
+- [x] `scripts/check_meta.py` validates all exports; `export --all` reproduces
+      parity (byte-identical since `--strip-metadata`).
+- [x] `export --reindex` can rebuild `manifest.json` from the metas.
+- [x] `nca/step.py` and `nca/spec.py` exist; `nca.ts` mirrors them with a test
       that fails on drift.
 
 ## Order and risk
