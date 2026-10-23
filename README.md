@@ -23,6 +23,16 @@ project is being developed on a machine without an NVIDIA GPU. To use CUDA,
 remove the `[tool.uv.sources]` / `[[tool.uv.index]]` blocks and re-run
 `uv sync`.
 
+### Playground in one command (Nix)
+
+```bash
+nix run github:smufa/nca          # http://127.0.0.1:8080, models baked in
+```
+
+No Python, torch or GPU needed: the site is static and runs the CA in the
+browser. A NixOS module and the hash-bump procedure are in
+[`docs/DEPLOY.md`](docs/DEPLOY.md).
+
 ## Quick start
 
 ```bash

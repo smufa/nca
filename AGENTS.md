@@ -80,6 +80,7 @@ slurm/train.sbatch        one job (sources .venv, unsets PYTHONPATH, pins --cons
 slurm/submit_sweep.sh     render a study's jobs: `bash … slurm/sweeps/<study>.toml`
 slurm/sweeps/*.toml       the studies: emoji-sweep, capacity, multi, cross, experiments, demo
 exports/                  exported models, committed (small); served to the UI
+flake.nix                 `nix run .#playground` + a NixOS module (docs/DEPLOY.md)
 assets/targets/           cached emoji PNGs (offline training)
 ```
 
@@ -119,6 +120,8 @@ cd frontend && npm install && npm run dev     # http://localhost:5173
 npm run build                                 # tsc + vite build
 
 bash scripts/verify.sh                        # compile + tests + meta + build + parity
+nix run .#playground                          # serve the built site (also a NixOS module)
+nix flake check                               # build the site (the deploy test suite)
 bash scripts/bench.sh crab.regenerating --reference   # headless GPU correctness/perf
 
 bash slurm/submit_sweep.sh slurm/sweeps/emoji-sweep.toml   # cluster: 18 jobs
