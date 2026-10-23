@@ -102,7 +102,7 @@ Lessons, in order of how much they cost to learn:
 `C`, `NP4`, `W1S4`, `HG`, `CONDN` and `LH` are WGSL `override` constants set per
 pipeline. They must stay **compile-time** — dynamic loop bounds cost ~1.9×. `LH`
 also selects the entry point: `hidden_layers == 1` uses `step`, deeper models use
-`step_deep`. `nca/export.py` pads each `W1` row from `3C` to `ceil(3C/4)*4` floats
+`step_deep`. `nca/export/weights.py` pads each `W1` row from `3C` to `ceil(3C/4)*4` floats
 so `vec4` loads stay aligned; at `C=16` that is a no-op, so old `weights.bin` files
 are unchanged (at `C=6`, 2 floats per row). Supported: `4 ≤ C ≤ 16`,
 `hidden % 4 == 0` (`ShaderRunner.supports`), otherwise the frontend falls back to

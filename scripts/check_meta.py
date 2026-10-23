@@ -23,6 +23,8 @@ Checks, cheapest first:
    ``cond`` input exists iff ``cond_n > 0``, opset 19)
 5. ``target.png`` / ``model.onnx`` exist; ``source_checkpoint`` still exists
    (a warning: exports are valid even when the run directory is gone)
+6. ``manifest.json`` embeds an exact copy of every ``meta.json`` (a hand-edited or
+   stale manifest is drift too; ``--fix`` regenerates it via ``reindex``)
 """
 
 from __future__ import annotations
@@ -419,6 +421,57 @@ def repair_target_png(model_dir: Path, meta: dict[str, Any]) -> Problem | None:
     return Problem("info", f"target.png rebuilt from {specs[0]!r}")
 
 
+def check_manifest(
+    exports: Path, metas: dict[str, dict[str, Any]], *, fix: bool = False
+) -> list[tuple[str, Problem]]:
+    """The manifest is a cache of the metas, so an entry must equal its meta.
+
+    Presentation keys (``name``/``sweep``/``train``) live in the meta as well --
+    the exporter writes them there -- so exact equality is the right test; a
+    difference means someone edited one of the two by hand.
+    """
+    path = exports / "manifest.json"
+    if not path.is_file():
+        if not metas:
+            return []
+        if fix:
+            from nca.export import reindex
+
+            reindex(exports)
+            return [("*", Problem("info", "manifest.json rebuilt by --fix"))]
+        return [("*", _error("no manifest.json"))]
+    try:
+        manifest = json.loads(path.read_text())
+    except json.JSONDecodeError as exc:
+        return [("*", _error(f"manifest.json is not valid JSON: {exc}"))]
+
+    entries = {m.get("id"): m for m in manifest.get("models", [])}
+    problems: list[tuple[str, Problem]] = []
+    for model_id, meta in metas.items():
+        entry = entries.pop(model_id, None)
+        if entry is None:
+            problems.append((model_id, _error("missing from manifest.json (run --reindex)")))
+            continue
+        if entry.get("path") != f"{model_id}/model.onnx":
+            problems.append((model_id, _error(f"manifest path {entry.get('path')!r} != {model_id}/model.onnx")))
+        recorded = entry.get("meta") or {}
+        differing = sorted(k for k in set(recorded) | set(meta) if recorded.get(k) != meta.get(k))
+        if differing:
+            detail = ", ".join(
+                f"{k}: manifest={recorded.get(k)!r} meta={meta.get(k)!r}" for k in differing[:3]
+            )
+            problems.append((model_id, _error(f"manifest entry drifted ({detail})")))
+    for orphan in entries:
+        problems.append((str(orphan), _error("in manifest.json but has no exports/ directory")))
+
+    if problems and fix:
+        from nca.export import reindex
+
+        reindex(exports)
+        problems = [("*", Problem("info", "manifest.json rebuilt by --fix"))]
+    return problems
+
+
 def check_exports(
     exports: Path = EXPORTS,
     *,
@@ -427,6 +480,7 @@ def check_exports(
     fix: bool = False,
 ) -> dict[str, list[Problem]]:
     results: dict[str, list[Problem]] = {}
+    metas: dict[str, dict[str, Any]] = {}
     rewrote = False
     for model_dir in sorted(p for p in exports.iterdir() if p.is_dir()):
         if only and not model_dir.name.startswith(only):
@@ -456,6 +510,11 @@ def check_exports(
             # still wrong plus what was just done.
             problems = check_model(model_dir, graph=graph)[1] + notes
         results[model_dir.name] = problems
+        if meta is not None:
+            metas[model_dir.name] = meta
+    if not only:
+        for model_id, problem in check_manifest(exports, metas, fix=fix):
+            results.setdefault(model_id, []).append(problem)
     if rewrote:
         # The manifest embeds a copy of each meta, so rewritten metas need a reindex.
         from nca.export import reindex
@@ -481,8 +540,10 @@ def main(argv: list[str] | None = None) -> int:
             errors += problem.level == "error"
             warns += problem.level == "warn"
             infos += problem.level == "info"
-    ok = len(results) - sum(any(p.level == "error" for p in ps) for ps in results.values())
-    print(f"\n{ok}/{len(results)} models clean | {errors} error(s), {warns} warning(s), {infos} note(s)")
+    # `*` rows are manifest-level notes, not models: they must not move the count.
+    models = {k: v for k, v in results.items() if not k.startswith("*")}
+    ok = len(models) - sum(any(p.level == "error" for p in ps) for ps in models.values())
+    print(f"\n{ok}/{len(models)} models clean | {errors} error(s), {warns} warning(s), {infos} note(s)")
     if errors or (args.strict and warns):
         return 1
     return 0

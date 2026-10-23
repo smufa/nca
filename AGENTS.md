@@ -46,7 +46,7 @@ nca/experiments.py  Experiment + REGIMES: every training default, in one place
 nca/sweep.py        `python -m nca.sweep <toml>`: render one sbatch call per run
 nca/train.py        training loop (sample pool, damage + noise, grad normalisation, resume)
 nca/targets.py      target images: emoji / image file / procedural shapes
-nca/export.py       export a checkpoint to ONNX + parity check + weights.bin
+nca/export/         export: graph.py (ONNX), verify.py (parity), weights.py, manifest.py, cli.py
 nca/cli.py          `python main.py` entry point (train)
 nca/sample.py       load a checkpoint, grow / regenerate (standalone)
 nca/viz.py          rendering, tiling, gifs, loss plots

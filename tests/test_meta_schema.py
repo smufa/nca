@@ -42,4 +42,30 @@ def test_manifest_lists_every_exported_model():
     assert listed == sorted(MODEL_IDS)
     for entry in manifest["models"]:
         assert entry["path"] == f"{entry['id']}/model.onnx"
-        assert entry["meta"]["id"] == entry["id"]
+        # The manifest embeds a copy, so it must be the copy -- not a stale one.
+        meta = json.loads((EXPORTS / entry["id"] / "meta.json").read_text())
+        assert entry["meta"] == meta, f"{entry['id']}: manifest entry != meta.json"
+
+
+def test_check_manifest_flags_drift(tmp_path):
+    """A hand-edited manifest is drift like any other; --fix is what repairs it."""
+    import json
+
+    from scripts.check_meta import check_manifest
+
+    entry = {"id": "a.b", "path": "a.b/model.onnx", "meta": {"id": "a.b", "grid": 72}}
+    (tmp_path / "manifest.json").write_text(json.dumps({"version": 1, "models": [entry]}))
+    metas = {"a.b": {"id": "a.b", "grid": 72}}
+    assert check_manifest(tmp_path, metas) == []
+
+    metas["a.b"] = {**metas["a.b"], "grid": 80}
+    problems = check_manifest(tmp_path, metas)
+    assert [model_id for model_id, _ in problems] == ["a.b"]
+    assert "drifted" in str(problems[0][1])
+
+    metas["c.d"] = {"id": "c.d", "grid": 72}  # a meta with no manifest entry
+    reported = {str(p) for _, p in check_manifest(tmp_path, metas)}
+    assert reported == {
+        "[error] manifest entry drifted (grid: manifest=72 meta=80)",
+        "[error] missing from manifest.json (run --reindex)",
+    }

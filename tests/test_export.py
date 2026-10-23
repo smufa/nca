@@ -142,8 +142,8 @@ def test_export_all_carries_the_presentation_fields(tmp_path, monkeypatch):
     meta_path.write_text(json.dumps(meta))
 
     seen: dict = {}
-    monkeypatch.setattr("nca.export.export_one", lambda **kw: seen.update(kw) or {})
-    monkeypatch.setattr("nca.export.reindex", lambda out: [])
+    monkeypatch.setattr("nca.export.cli.export_one", lambda **kw: seen.update(kw) or {})
+    monkeypatch.setattr("nca.export.cli.reindex", lambda out: [])
     export_all(exports, do_verify=False)
 
     assert seen["carry"] == {

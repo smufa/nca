@@ -12,7 +12,7 @@ Anything that needs to *build* a module does ``spec.build()``, which imports
 torch lazily.
 
 The one rule: **read a model's shape, never infer it.** ``infer_dims`` used to
-be duplicated in ``nca/export.py`` and ``nca/sample.py``; the copy in
+be duplicated in ``nca/export`` and ``nca/sample.py``; the copy in
 ``sample.py`` computed ``in_channels // 3``, which is wrong for any conditional
 model (``3C + cond_n``) and blind to ``hidden_layers`` / ``learn_perception``.
 """

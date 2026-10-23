@@ -203,7 +203,7 @@ nca/train.py         training loop, damage masks, gradient normalisation
 nca/viz.py           rendering, tiling, gifs, loss plots
 nca/cli.py           argument parsing and wiring
 nca/sample.py        run a checkpoint, grow / regenerate
-nca/export.py        export a checkpoint to ONNX + parity check
+nca/export/          export a checkpoint: ONNX graph, parity, weights.bin, manifest
 exports/             exported models + manifest.json
 frontend/            Vite + TypeScript + onnxruntime-web playground
 ```

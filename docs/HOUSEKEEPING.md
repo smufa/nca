@@ -456,7 +456,15 @@ supports(spec: ModelSpec): { ok: true } | { ok: false; reason: string }
   `layers <= 2` (one `wmid` block in `weights.bin`), and a grid budget of
   128 MiB / (3*C*4) pixels ≈ 836² at C=16.
   Still open: no JS unit test runner (the outcome is covered by `tsc` + manual).
-- [ ] `nca/export.py` (506 lines) → `nca/export/{graph,weights,verify,manifest}.py`.
+- [x] `nca/export.py` (819 lines) → a package: `graph.py` (162: `ExportStep`,
+      `export_step`, the metadata strip), `verify.py` (98: torch-vs-ONNX rollout
+      parity), `weights.py` (54: `weights.bin`), `manifest.py` (187: targets,
+      `--reindex`), `cli.py` (379: `export_one`/`export_all`/argparse),
+      `__init__.py` re-exporting the old surface. Proof it is a move and not a
+      rewrite: re-exporting `crab.regenerating` from its checkpoint produces a
+      **byte-identical** `model.onnx` and `weights.bin`. Tests that monkeypatched
+      `nca.export.export_one` now patch `nca.export.cli.export_one` (the CLI
+      resolves it in its own module).
 - [x] `nca/step.py`: torch-free canonical primitives (`ident/dx/dy`,
       `perception_weight`, `make_seed`, `map_channels`/`ChannelMapping`) imported
       by `nca/model.py`, `nca/targets.py`, `nca/viz.py` and

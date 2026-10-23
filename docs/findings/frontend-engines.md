@@ -51,7 +51,7 @@ parity first and refuses to time a mismatch. `tests/test_engine_bindings.py`
 asserts the engine's bind groups still match the shaders' `@binding` order — with
 `layout: 'auto'` a wrong order is a silent buffer swap.
 
-Weight layout is the contract with `nca/export.py` (`weights.bin`) and comes from
+Weight layout is the contract with `nca/export/weights.py` (`weights.bin`) and comes from
 `ModelSpec.weight_offsets()`; see `shader-perf.md` for the load-bound measurements
 and the compile-time overrides (`C`, `NP4`, `W1S4`, `HG`, `CONDN`).
 
