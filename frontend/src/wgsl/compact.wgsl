@@ -1,7 +1,7 @@
 // Work-skipping, pass A: make the next state a copy of the old one for every cell,
 // then append the cells that will actually update to a work list.
 //
-// The point is that the update rule (`ws_mlp.wgsl`) only runs for the listed cells.
+// The point is that the update rule (`step_list.wgsl`) only runs for the listed cells.
 // At fire_rate 0.5 that is half the grid, and the MLP is ~73% of the step.
 //
 // `out` is written for every cell (a straight copy) because pass2 (the living

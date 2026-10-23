@@ -110,7 +110,7 @@ bash slurm/submit_sweep.sh slurm/sweeps/emoji-sweep.toml   # cluster: 18 jobs
 | engine | runtime | notes |
 |---|---|---|
 | `wasm` | onnxruntime-web WASM | compatibility fallback |
-| `shader` | native WGSL | performance path; 2 dispatches, zero-copy render + GPU brush |
+| `shader` | native WGSL | performance path; work-skip (4 passes, 1.6x) or 2 passes for deep models; zero-copy render + GPU brush |
 
 Both advertise a `Capabilities` object (`frontend/src/engine.ts`) and `checkSpec()`
 is the only place a spec is tested against one — no `?.` feature probing. The ORT

@@ -710,10 +710,11 @@ async function selectModel(model: ManifestModel): Promise<void> {
   drawAll();
   updateInfo();
   const label = runner.capabilities.label;
+  const skip = runner.capabilities.workSkip ? ' · work-skip' : '';
   if (fallbackReason) {
-    setStatus(`ready · ${label} (shader cannot run this model: ${fallbackReason})`, 'warn');
+    setStatus(`ready · ${label}${skip} (shader cannot run this model: ${fallbackReason})`, 'warn');
   } else {
-    setStatus(`ready · ${label}`, 'ok');
+    setStatus(`ready · ${label}${skip}`, 'ok');
   }
   markPickerSupport();
 }

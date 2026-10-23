@@ -32,8 +32,9 @@ import numpy as np
 import wgpu
 
 ROOT = Path(__file__).resolve().parents[1]
+# The shaders under test are the ones the engine ships (`ShaderRunner` runs the same
+# three passes), so this measures production code, not a copy of it.
 WGSL_DIR = ROOT / "frontend" / "src" / "wgsl"
-VARIANTS_DIR = ROOT / "scripts" / "variants"
 
 
 def canonical_kernels() -> np.ndarray:
@@ -161,12 +162,12 @@ def main() -> None:
         "read-only-storage", "read-only-storage", "read-only-storage", "read-only-storage",
         "storage", "uniform", "read-only-storage", "read-only-storage", "read-only-storage",
     ])
-    pipe_c = pipe((VARIANTS_DIR / "ws_compact.wgsl").read_text(), "main",
+    pipe_c = pipe((WGSL_DIR / "compact.wgsl").read_text(), "main",
                   device.create_pipeline_layout(bind_group_layouts=[layout_c]), {"C": C})
-    pipe_f = pipe((VARIANTS_DIR / "ws_finalize.wgsl").read_text(), "main",
+    pipe_f = pipe((WGSL_DIR / "finalize.wgsl").read_text(), "main",
                   device.create_pipeline_layout(bind_group_layouts=[layout_f]), {})
     pipe_m = pipe(
-        patch((VARIANTS_DIR / "ws_mlp.wgsl").read_text()),
+        patch((WGSL_DIR / "step_list.wgsl").read_text()),
         "main",
         device.create_pipeline_layout(bind_group_layouts=[layout_m]),
         consts,

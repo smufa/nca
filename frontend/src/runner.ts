@@ -40,6 +40,7 @@ export class CaRunner implements CaEngine {
     cond: true,
     gpuBrush: false,
     gpuRender: false,
+    workSkip: false,
     maxC: Infinity,
     maxHidden: Infinity,
     maxLayers: Infinity,

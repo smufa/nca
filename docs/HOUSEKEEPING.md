@@ -489,10 +489,19 @@ was the entry-point split + explicit ILP (1.35×).
   (2.4e-07) and ~2% faster at 256² (15.49 vs 15.77 ms/step) — perception is only
   27% of the step and already L1-served, so the engine/render/brush churn an
   AoS↔SoA change needs buys nothing. The variants stay as the record.
-- **Not started, and now the interesting lever:** fp16 (the iGPU exposes
-  `shader-f16`) and a GEMM-over-cells formulation (give each thread several cells,
-  `W1` as the shared operand) — the MLP is latency-bound, so only changing *how*
-  it is evaluated moves the number.
+- **Not started, and now the interesting lever:** a GEMM-over-cells formulation
+  (give each thread several cells, `W1` as the shared operand) — the MLP is
+  latency-bound, so only changing *how* it is evaluated moves the number.
+- **Done and shipped: work-skipping.** At `fire_rate 0.5` the update rule ran for
+  cells whose output was then multiplied by zero. `compact` + `finalize` +
+  `step_list` (indirect dispatch over a work list) is 1.3× at 72², 1.6× at 256²,
+  1.65× at 512² and **bit-identical** to the plain path, so `ShaderRunner` now runs
+  it for single-hidden-layer models (deep models keep `pass1`). Measurement and
+  the per-grid table: `docs/findings/shader-perf.md`.
+- **Done and rejected: fp16** (1.42× *slower* — WebGPU's fp16 is storage-only on
+  Gen9, so every op gains conversions) and **int8** (no packed 4×8-bit dot in
+  WebGPU, and 0.88 drift / 27 dB quality). Both recorded with numbers, so a future
+  GPU can re-measure instead of re-deriving.
 - `supports()` still needs a real `maxGridPx` (3 state buffers × `C·H·W·4` bytes:
   200 MB at 1024²/C=16, above the 128 MiB default binding size).
 - No re-export needed (the ONNX graph is shape-agnostic).

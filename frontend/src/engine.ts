@@ -19,6 +19,12 @@ export interface Capabilities {
   readonly gpuBrush: boolean;
   /** Rendering straight from GPU state (`renderTo`). */
   readonly gpuRender: boolean;
+  /**
+   * Work-skipping: the update rule runs only for cells the fire mask selects
+   * (`compact` + `finalize` + `step_list` instead of `pass1`). Needs one hidden
+   * layer, because only the shallow rule has a list-driven entry point.
+   */
+  readonly workSkip: boolean;
   readonly maxC: number;
   readonly maxHidden: number;
   readonly maxLayers: number;

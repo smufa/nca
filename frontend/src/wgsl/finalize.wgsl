@@ -11,7 +11,7 @@
 @compute @workgroup_size(1, 1, 1)
 fn main() {
   let n = atomicLoad(&count);
-  indargs[0] = (n + 63u) / 64u;  // ws_mlp uses a 64-wide workgroup
+  indargs[0] = (n + 63u) / 64u;  // step_list.wgsl uses a 64-wide workgroup
   indargs[1] = 1u;
   indargs[2] = 1u;
 }

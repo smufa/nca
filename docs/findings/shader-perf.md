@@ -180,14 +180,21 @@ the full MLP for those cells and multiplies the result by zero. The branch versi
 paths. Compaction sidesteps that: list the cells that fire, then dispatch the
 update rule with `dispatch_workgroups_indirect` over the list only.
 
-Four dispatches per step instead of two (`scripts/work_skip_bench.py`,
-`scripts/variants/ws_*.wgsl`):
+Four dispatches per step instead of two (`scripts/work_skip_bench.py`, which drives
+the shipped shaders):
 
-1. `ws_compact`: `out = state` for every cell, plus `atomicAdd` of firing cells
-2. `ws_finalize` (1 thread): list length -> indirect args, `ceil(n/64)`
-3. `ws_mlp`: the shipped `step` body, with the cell index from the list, dispatched
+1. `frontend/src/wgsl/compact.wgsl`: `out = state` for every cell, plus `atomicAdd` of firing cells
+2. `frontend/src/wgsl/finalize.wgsl` (1 thread): list length -> indirect args, `ceil(n/64)`
+3. `frontend/src/wgsl/step_list.wgsl`: the shipped `step` body, with the cell index from the list, dispatched
    with `dispatch_workgroups_indirect` (one 64-wide workgroup per 64 cells)
 4. `pass2` unchanged (living mask)
+
+**Shipped**: `ShaderRunner` runs these for single-hidden-layer models (deep models
+keep `pass1`, whose `step_deep` has no list entry point). The three shaders moved
+from `scripts/variants/` to `frontend/src/wgsl/` so the benchmark and the engine
+measure the same code; `?ws=0` selects the plain path in the browser.
+`tests/test_engine_bindings.py` guards the one thing TypeScript cannot: with
+`layout: 'auto'`, an entry in the wrong order silently swaps buffers.
 
 Bit-exact against the baseline pipeline over 20 steps (`max|d| = 0.000e+00`), because
 the MLP code is `pass1.wgsl`'s, unchanged.

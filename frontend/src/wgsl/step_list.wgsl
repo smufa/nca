@@ -6,7 +6,7 @@
 //   * fire is implicit (only firing cells are in the list),
 //   * the write-back adds `step` without multiplying by a fire value.
 //
-// 64 threads per workgroup because the list is 1-D; `ws_finalize.wgsl` converts
+// 64 threads per workgroup because the list is 1-D; `finalize.wgsl` converts
 // the list length into indirect dispatch args of ceil(n/64).
 
 override C: u32 = 16u;
