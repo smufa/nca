@@ -150,6 +150,9 @@ Details: [`docs/findings/frontend-engines.md`](docs/findings/frontend-engines.md
 
 **Add a model**: train → `nca.export` (writes `exports/<id>/{model.onnx,meta.json,
 weights.bin,target.png}`, updates `manifest.json`) → `scripts/check_meta.py` → commit.
+When the run dir still exists the exporter also records `meta.loss` — the curve the
+picker's sparkline draws (bucket-averaged to ≤64 points, log scale). A 10-second
+smoke run gets a one-point curve; a real run gets a shape.
 
 **Change the shader**: edit `frontend/src/wgsl/pass1.wgsl` →
 `bash scripts/bench.sh <model> --reference` (correctness + perf) → `npm run build`.

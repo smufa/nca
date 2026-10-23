@@ -21,6 +21,7 @@ import { app, resetPerfBaseline, setStatus, whenIdle } from './app';
 import { hasCond, readCondVector, setupCond } from './cond';
 import { gridSizeSelect, modelSelect, playBtn } from './dom';
 import { updateInfo } from './info';
+import { fmtLoss } from './sparkline';
 import { resetKernelsUI } from './kernels';
 import { drawAll, rebuildViews } from './views';
 
@@ -123,7 +124,9 @@ export async function loadModels(): Promise<void> {
       const opt = document.createElement('option');
       opt.value = m.id;
       opt.textContent = g.label;
-      opt.title = `${m.id} · ${m.meta.experiment} · C=${m.meta.channel_n} h=${m.meta.hidden_n}`;
+      const curve = m.meta.loss;
+      const conv = curve ? ` · min ${fmtLoss(curve.min)} @ ${Math.round(curve.min_at * 100)}%` : '';
+      opt.title = `${m.id} · ${m.meta.experiment} · C=${m.meta.channel_n} h=${m.meta.hidden_n}${conv}`;
       og.appendChild(opt);
     }
     modelSelect.appendChild(og);

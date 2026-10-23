@@ -69,3 +69,19 @@ def test_check_manifest_flags_drift(tmp_path):
         "[error] manifest entry drifted (grid: manifest=72 meta=80)",
         "[error] missing from manifest.json (run --reindex)",
     }
+
+
+def test_committed_loss_blocks_are_drawable():
+    """The picker draws `meta.loss` directly; every recorded curve must be sane."""
+    import json
+    from pathlib import Path
+
+    exports = Path(__file__).resolve().parents[1] / "exports"
+    for meta_path in sorted(exports.glob("*/meta.json")):
+        loss = json.loads(meta_path.read_text()).get("loss")
+        if loss is None:
+            continue
+        assert 0 < len(loss["points"]) <= 64, meta_path
+        assert all(isinstance(v, (int, float)) for v in loss["points"]), meta_path
+        assert 0.0 <= loss["min_at"] <= 1.0, meta_path
+        assert loss["logged"] >= len(loss["points"]), meta_path

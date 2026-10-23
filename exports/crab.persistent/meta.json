@@ -2,7 +2,7 @@
   "id": "crab.persistent",
   "name": "crab.persistent",
   "sweep": "emoji-sweep",
-  "created": "2026-10-23T13:22:56",
+  "created": "2026-10-23T14:35:25",
   "channel_n": 16,
   "cond_n": 0,
   "hidden_layers": 1,
@@ -55,8 +55,8 @@
   "onnxruntime_version": "1.31.0",
   "onnx_ir_version": 10,
   "parity_max_abs_diff": {
-    "72": 7.62939453125e-06,
-    "80": 3.814697265625e-06
+    "72": 1.7881393432617188e-07,
+    "80": 4.76837158203125e-07
   },
   "weights": {
     "file": "weights.bin",
@@ -74,5 +74,5 @@
     "count": 8336
   },
   "size_bytes": 38428,
-  "git_rev": "19c32fd"
+  "git_rev": "1325296"
 }

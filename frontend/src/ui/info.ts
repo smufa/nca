@@ -1,7 +1,25 @@
 /** The model-information panel. Nothing here affects the run. */
 
 import { app } from './app';
-import { infoEl } from './dom';
+import { infoEl, lossBlock, lossCanvas, lossCaption } from './dom';
+import { drawLossCurve, fmtLoss } from './sparkline';
+import type { ModelMeta } from '../models';
+
+/** The model the sparkline was last drawn for (updateInfo runs every frame). */
+let drawnFor: ModelMeta | undefined;
+
+function updateLoss(m: ModelMeta): void {
+  if (m === drawnFor) return;
+  drawnFor = m;
+  const curve = m.loss;
+  lossBlock.hidden = !curve;
+  if (!curve) return;
+  drawLossCurve(lossCanvas, curve);
+  lossCaption.textContent = `loss ${fmtLoss(curve.final)} → min ${fmtLoss(curve.min)} @ ${Math.round(curve.min_at * 100)}%`;
+  lossBlock.title =
+    `${curve.logged} logged values, bucketed to ${curve.points.length} samples ` +
+    `(log scale); the dot marks the minimum`;
+}
 
 export function updateInfo(): void {
   const runner = app.runner;
@@ -27,4 +45,5 @@ export function updateInfo(): void {
   ]
     .map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`)
     .join('');
+  updateLoss(m);
 }

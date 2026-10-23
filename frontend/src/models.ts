@@ -1,5 +1,16 @@
 /** Types mirroring `exports/<id>/meta.json` and `exports/manifest.json`. */
 
+export interface LossCurve {
+  /** Bucket-averaged losses (<= 64 samples), oldest first. */
+  points: number[];
+  /** How many entries the run logged (the curve is these, averaged). */
+  logged: number;
+  min: number;
+  final: number;
+  /** Where `min` occurred, as a fraction of the run (0..1). */
+  min_at: number;
+}
+
 export interface ModelMeta {
   id: string;
   /** The id, duplicated in meta; the id *is* the name (see docs/HOUSEKEEPING.md). */
@@ -10,6 +21,8 @@ export interface ModelMeta {
   train?: Record<string, string | number>;
   /** Presentation override; absent means "derive it from the id". */
   picker?: { group?: string; label?: string; order?: number };
+  /** The training curve, for the picker sparkline (absent on old exports). */
+  loss?: LossCurve;
   created: string;
   channel_n: number;
   hidden_n: number;

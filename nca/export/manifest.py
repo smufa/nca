@@ -8,6 +8,7 @@ with `--refresh-targets`, re-renders `target.png`/`target.npy`) from the metas.
 from __future__ import annotations
 
 import json
+import math
 import time
 from pathlib import Path
 
@@ -151,13 +152,17 @@ def _refresh_target_artefacts(out_dir: Path, meta: dict) -> str | None:
     return None
 
 
-def reindex(out_dir: Path, *, fix_targets: bool = False) -> list[dict]:
+def reindex(out_dir: Path, *, fix_targets: bool = False, fix_loss: bool = False) -> list[dict]:
     """Rebuild ``manifest.json`` from ``exports/*/meta.json``.
 
     ``meta.json`` is the source of truth and the manifest is a cache of it, so the
     manifest can always be regenerated: that is what makes the append-only
     ``_update_manifest`` crash-safe and what removes manifest/meta drift after a
     re-export or a manual edit.
+
+    ``fix_loss`` backfills the ``loss`` block into metas exported before it was
+    recorded, from the run dir beside ``source_checkpoint`` (silently skipped when
+    that run is gone -- a curve cannot be invented).
     """
     out_dir = Path(out_dir)
     models: list[dict] = []
@@ -167,6 +172,11 @@ def reindex(out_dir: Path, *, fix_targets: bool = False) -> list[dict]:
         if fix_targets:
             error = _refresh_target_artefacts(out_dir, {**meta, "id": model_id})
             print(f"  {'ok  ' if error is None else 'skip'} {model_id}" + (f": {error}" if error else ""))
+        if fix_loss and "loss" not in meta:
+            curve = _loss_from_source(meta)
+            if curve:
+                meta["loss"] = curve
+                meta_path.write_text(json.dumps(meta, indent=2) + "\n")
         models.append({"id": model_id, "path": f"{model_id}/model.onnx", "meta": meta})
     manifest = {
         "version": 1,
@@ -177,11 +187,59 @@ def reindex(out_dir: Path, *, fix_targets: bool = False) -> list[dict]:
     return manifest["models"]
 
 
-PRESENTATION_KEYS = ("name", "sweep", "train", "picker")
+PRESENTATION_KEYS = ("name", "sweep", "train", "picker", "loss")
+
+
+def loss_curve(run_dir: str | Path, points: int = 64) -> dict | None:
+    """A compact loss curve from the run's ``loss.json``.
+
+    ``loss.json`` is one float per ``log_every`` iterations (tens to thousands of
+    entries); the UI wants a shape, not a dataset, so bucket-mean it down to
+    ``points`` samples. Bucket mean rather than subsample: the per-log loss is
+    noisy, and a spike drawn from the noise looks like a training failure.
+
+    Returns ``None`` when the run did not log anything (a legacy run, or a
+    rebuild from an export that never had a curve).
+    """
+    path = Path(run_dir) / "loss.json"
+    if not path.is_file():
+        return None
+    try:
+        values = [float(v) for v in json.loads(path.read_text())]
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return None
+    values = [v for v in values if math.isfinite(v)]
+    if not values:
+        return None
+
+    n = len(values)
+    if n > points:
+        edges = [round(i * n / points) for i in range(points + 1)]
+        buckets = [values[a:b] for a, b in zip(edges, edges[1:]) if b > a]
+        sampled = [sum(b) / len(b) for b in buckets]
+    else:
+        sampled = values
+
+    lo = min(values)
+    return {
+        "points": [round(v, 6) for v in sampled],
+        "logged": n,
+        "min": round(lo, 6),
+        "final": round(values[-1], 6),
+        # Where the minimum was, as a fraction of the run: the UI marks it so a
+        # model that bottomed out at 20% and then drifted is visible as such.
+        "min_at": round(values.index(lo) / max(n - 1, 1), 4),
+    }
 
 
 def _carry_over(meta: dict) -> dict:
     """The presentation fields of an existing meta, for ``export_one(carry=...)``."""
     return {k: meta[k] for k in PRESENTATION_KEYS if k in meta}
+
+
+def _loss_from_source(meta: dict) -> dict | None:
+    """The recorded loss curve, from the run dir beside ``source_checkpoint``."""
+    source = str(meta.get("source_checkpoint", ""))
+    return loss_curve(Path(source).parent) if source else None
 
 

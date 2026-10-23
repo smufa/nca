@@ -89,7 +89,32 @@ def _check_files(model_dir: Path, meta: dict[str, Any]) -> list[Problem]:
         problems.append(_warn(f"source_checkpoint {checkpoint} is gone (re-export needs it)"))
     if meta.get("weights", {}).get("file", "weights.bin") != "weights.bin":
         problems.append(_error("weights.file must be weights.bin (the frontend fetches it by name)"))
+    problems += _check_loss_block(meta)
     return problems
+
+
+def _check_loss_block(meta: dict[str, Any]) -> list[Problem]:
+    """The picker's sparkline reads ``meta.loss``; a malformed block must not break it.
+
+    Optional by design: a curve cannot be invented for a run whose ``loss.json`` is
+    gone, so absence is normal (19 exports). Presence is checked, because the
+    frontend draws straight from these numbers.
+    """
+    loss = meta.get("loss")
+    if loss is None:
+        return []
+    if not isinstance(loss, dict):
+        return [_error("loss must be an object")]
+    points = loss.get("points")
+    if not isinstance(points, list) or not points or len(points) > 64:
+        return [_error(f"loss.points must be a non-empty list of <= 64 numbers, got {points!r:.40}")]
+    values = [loss.get(k) for k in ("min", "final")]
+    if not all(isinstance(v, (int, float)) for v in values):
+        return [_error("loss.min/loss.final must be numbers")]
+    at = loss.get("min_at")
+    if not isinstance(at, (int, float)) or not 0.0 <= at <= 1.0:
+        return [_error(f"loss.min_at must be a fraction in [0, 1], got {at!r}")]
+    return []
 
 
 def _check_spec_fields(

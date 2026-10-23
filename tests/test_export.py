@@ -269,3 +269,112 @@ def test_derive_spec_sees_layers_and_zero_padding():
     demo, _ = derive_spec(EXPORTS / "smile.demo", by_id["smile.demo"])
     assert not any(node.op_type == "Pad" for node in onnx.load(str(EXPORTS / "smile.demo" / "model.onnx")).graph.node)
     assert demo.wrap is False
+
+
+# --- the loss curve (the picker sparkline) ----------------------------------
+
+
+def test_loss_curve_buckets_to_64_points(tmp_path):
+    from nca.export.manifest import loss_curve
+
+    run = tmp_path / "run"
+    run.mkdir()
+    values = [1.0 / (1 + i) for i in range(500)]
+    (run / "loss.json").write_text(json.dumps(values))
+
+    curve = loss_curve(run)
+
+    assert curve["logged"] == 500
+    assert len(curve["points"]) == 64
+    assert curve["min"] == pytest.approx(min(values), abs=1e-6)
+    assert curve["final"] == pytest.approx(values[-1], abs=1e-6)
+    assert curve["min_at"] == pytest.approx(1.0, abs=1e-4)  # the minimum is the last entry
+    # Averaging, not subsampling: the first bucket spans the first ~8 values.
+    assert curve["points"][0] == pytest.approx(sum(values[:8]) / 8, abs=1e-6)
+
+
+def test_loss_curve_is_absent_when_nothing_was_logged(tmp_path):
+    from nca.export.manifest import loss_curve
+
+    run = tmp_path / "run"
+    run.mkdir()
+    assert loss_curve(run) is None  # no loss.json
+    (run / "loss.json").write_text("[]")
+    assert loss_curve(run) is None  # logged nothing
+    (run / "loss.json").write_text("not json")
+    assert loss_curve(run) is None  # corrupt: the UI just hides the sparkline
+
+
+def test_reindex_backfills_the_loss_curve(tmp_path):
+    from nca.export.manifest import reindex
+
+    torch = pytest.importorskip("torch")
+    exports = tmp_path / "exports"
+    run = tmp_path / "run"
+    run.mkdir()
+    ca = ModelSpec(channel_n=8, hidden_n=16).build()
+    checkpoint = run / "ckpt_final.pt"
+    torch.save({"model": ca.state_dict()}, checkpoint)
+    (run / "loss.json").write_text(json.dumps([1.0, 0.5, 0.25]))
+    export_one(
+        checkpoint=checkpoint,
+        model_id="tiny",
+        out_dir=exports,
+        grid=16,
+        dynamic=True,
+        opset=DEFAULT_OPSET,
+        experiment=None,
+        target="unknown",
+        do_verify=False,
+        verify_steps=1,
+    )
+    meta_path = exports / "tiny" / "meta.json"
+    meta = json.loads(meta_path.read_text())
+    meta.pop("loss")  # an export made before the curve was recorded
+    meta_path.write_text(json.dumps(meta))
+
+    models = reindex(exports, fix_loss=True)
+
+    assert models[0]["meta"]["loss"]["final"] == pytest.approx(0.25)
+    assert json.loads(meta_path.read_text())["loss"]["logged"] == 3
+
+
+def test_unverified_reexport_keeps_the_recorded_parity(tmp_path):
+    """A byte-identical graph keeps the parity measured on it.
+
+    `nca.export --all` without --verify dropped the parity block from every meta
+    once; the record must survive a re-export that provably did not change the
+    graph (and must be dropped when it did).
+    """
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("onnxruntime")
+
+    exports = tmp_path / "exports"
+    run = tmp_path / "run"
+    run.mkdir()
+    ca = ModelSpec(channel_n=8, hidden_n=16).build()
+    checkpoint = run / "ckpt_final.pt"
+    torch.save({"model": ca.state_dict()}, checkpoint)
+    kwargs = dict(
+        checkpoint=checkpoint,
+        model_id="tiny",
+        out_dir=exports,
+        grid=16,
+        dynamic=True,
+        opset=DEFAULT_OPSET,
+        experiment=None,
+        target="unknown",
+        verify_steps=1,
+    )
+    export_one(**kwargs, do_verify=True)
+    measured = json.loads((exports / "tiny" / "meta.json").read_text())["parity_max_abs_diff"]
+    assert measured
+
+    export_one(**kwargs, do_verify=False)
+    kept = json.loads((exports / "tiny" / "meta.json").read_text())["parity_max_abs_diff"]
+    assert kept == measured
+
+    # A different graph must not inherit a measurement it never had.
+    torch.save({"model": ModelSpec(channel_n=8, hidden_n=32).build().state_dict()}, checkpoint)
+    export_one(**kwargs, do_verify=False)
+    assert json.loads((exports / "tiny" / "meta.json").read_text())["parity_max_abs_diff"] is None

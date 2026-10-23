@@ -20,6 +20,7 @@ from .manifest import (
     _run_train_json,
     _train_block,
     _update_manifest,
+    loss_curve,
     reindex,
 )
 from .rebuild import model_from_export
@@ -53,6 +54,12 @@ def export_one(
     checkpoint = Path(checkpoint)
     out_dir = Path(out_dir)
     model_dir = out_dir / model_id
+    prior_meta = None
+    prior_onnx = None
+    if (model_dir / "meta.json").is_file():
+        prior_meta = json.loads((model_dir / "meta.json").read_text())
+    if (model_dir / "model.onnx").is_file():
+        prior_onnx = (model_dir / "model.onnx").read_bytes()
     model_dir.mkdir(parents=True, exist_ok=True)
 
     if rebuild:
@@ -64,6 +71,7 @@ def export_one(
         max_size = max_size if max_size is not None else prior.get("target_size")
         padding = padding if padding is not None else prior.get("padding")
         run = run if run is not None else prior.get("train")
+        loss = None
         experiment = experiment or (run or {}).get("regime") or prior.get("experiment") or "unknown"
     else:
         # Explicit flag > the run's own train.json > unknown. Deliberately no default:
@@ -76,6 +84,10 @@ def export_one(
         # a re-export needs no --experiment/--train flags to stay reproducible.
         run = _run_train_json(checkpoint) if run is None else run
         ca = _load_ca(checkpoint, wrap=wrap)
+        # The convergence shape, carried into the meta so the picker can show it
+        # (the run's loss.json is not part of an export, and for many models the
+        # run does not survive; a rebuild keeps whatever was recorded).
+        loss = loss_curve(checkpoint.parent)
 
     train_block = _train_block(run or {}, train)
     experiment = experiment or train_block.get("regime") or "unknown"
@@ -104,6 +116,17 @@ def export_one(
     parity = None
     if do_verify:
         parity = verify(ca, onnx_path, grid, verify_steps, dynamic)
+    elif (
+        prior_meta
+        and prior_meta.get("parity_max_abs_diff")
+        and prior_onnx is not None
+        and prior_onnx == onnx_path.read_bytes()
+    ):
+        # An unverified re-export must not erase the record: if the bytes are
+        # identical to the ones that were verified, the old measurement still
+        # describes this graph. (Before this, `nca.export --all` without --verify
+        # silently dropped the parity block from all 45 metas.)
+        parity = prior_meta["parity_max_abs_diff"]
 
     if target_arr is not None:
         save_image(render(torch.from_numpy(target_arr))[0], model_dir / "target.png")
@@ -154,6 +177,11 @@ def export_one(
     }
     if train_block:
         meta["train"] = train_block
+    # `loss` is the one training artefact the picker shows; a rebuild carries the
+    # recorded curve (PRESENTATION_KEYS) since the run's loss.json is gone.
+    curve = loss if loss is not None else (carry or {}).get("loss")
+    if curve:
+        meta["loss"] = curve
     (model_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
 
     entry = {
@@ -308,7 +336,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--refresh-targets",
         action="store_true",
         help="with --reindex: re-render target.png/target.npy for every meta that records "
-        "target_size+padding (repairs exports whose target.npy is gone)",
+        "one, and backfill the `loss` block from the run dirs that still exist "
+        "(target_size+padding repairs exports whose target.npy is gone)",
     )
     p.add_argument(
         "--targets",
@@ -371,7 +400,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     if args.reindex:
-        models = reindex(Path(args.out), fix_targets=args.refresh_targets)
+        models = reindex(Path(args.out), fix_targets=args.refresh_targets, fix_loss=args.refresh_targets)
         print(f"Reindexed {len(models)} model(s) into {Path(args.out) / 'manifest.json'}")
         return
 
