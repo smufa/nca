@@ -56,7 +56,18 @@ frontend/src/
   runner.ts         CaRunner (onnxruntime-web WASM) · shader.ts ShaderRunner (WGSL)
   wgsl/*.wgsl       the shaders, shared with the Python bench
   nca.ts            pure helpers: perception kernels, seed, channel mapping
-  main.ts           UI: views, brush, kernel lab, engine/grid switches
+  main.ts           entry point: 23 lines of wiring
+  ui/app.ts         shared UI state + busy/whenIdle + status/perf
+  ui/dom.ts         one `el()` lookup per element (throws if index.html drifts)
+  ui/views.ts       canvas panels + ChannelMapping
+  ui/channels.ts    the per-view channel selects
+  ui/brush.ts       brush strokes (GPU brush or edit())
+  ui/kernels.ts     kernel lab (rotate / edit)
+  ui/cond.ts        conditioning sliders
+  ui/picker.ts      manifest -> grouped options -> session swap
+  ui/info.ts        the model-information panel
+  ui/loop.ts        frame loop + transport controls
+  ui/console.ts     `window.nca` helpers
   models.ts         manifest + meta types + picker grouping
 
 scripts/shader_bench.py   headless GPU correctness/benchmark harness (wgpu-py)

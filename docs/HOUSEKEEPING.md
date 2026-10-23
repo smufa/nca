@@ -413,10 +413,18 @@ needed (growing vs regenerating is not comparable through `min_loss` today) or w
 
 ## Phase 5 — Frontend seams
 
-- [ ] `frontend/src/main.ts` (983 lines) split behind the seams that already
-      exist: `ui/views.ts` (`View`, `ChannelMapping`, canvas draw), `ui/kernelLab.ts`,
-      `ui/condPanel.ts`, `ui/brush.ts`, `ui/perf.ts`, and `session.ts` (owns
-      `runner`, `selectToken`, `whenIdle`, `busy`). `main.ts` becomes wiring.
+- [x] `frontend/src/main.ts` (983 lines) split behind the seams that already
+      exist. **As built:** `main.ts` is 23 lines of wiring; the modules are
+      `ui/dom.ts` (one `el()` lookup per element, throws if `index.html` drifts),
+      `ui/app.ts` (the shared mutable state + `busy`/`whenIdle` + status/perf),
+      `ui/views.ts` (canvas panels, `ChannelMapping`), `ui/channels.ts` (the
+      per-view channel selects), `ui/brush.ts` (stroke + tool wiring, GPU brush
+      or `edit()`), `ui/kernels.ts` (kernel lab), `ui/cond.ts` (conditioning
+      sliders), `ui/picker.ts` (manifest → grouped options → session swap),
+      `ui/info.ts` (the model panel), `ui/loop.ts` (frame loop + transport),
+      `ui/console.ts` (`window.nca`). Two cycles are load-bearing and safe
+      (function-level, never at module init): `views ↔ brush` and
+      `picker → views/cond/kernels`.
 - [x] Capability negotiation replaces `?.` probing. Today
       `ShaderRunner.supports()` returns a bare bool and `main.ts` silently falls
       back to WASM; `setCond?`, `renderTo?`, `brush?` are optional methods the
