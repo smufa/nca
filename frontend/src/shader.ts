@@ -16,7 +16,8 @@
 import type { ManifestModel } from './models';
 import { CANONICAL_KERNELS, modelKernels, mulberry32, seedState } from './nca';
 import type { Rng } from './nca';
-import type { BrushOp, CaEngine, Perf } from './engine';
+import type { BrushOp, CaEngine, Capabilities, Perf, Support } from './engine';
+import { checkSpec } from './engine';
 import type { ChannelMapping } from './nca';
 
 import PASS1 from './wgsl/pass1.wgsl?raw';
@@ -120,8 +121,9 @@ export class ShaderRunner implements CaEngine {
   }
 
   static async create(model: ManifestModel, seed = 1): Promise<ShaderRunner> {
-    if (!ShaderRunner.supports(model)) {
-      throw new Error('shader engine unsupported for this model size');
+    const support = ShaderRunner.supports(model);
+    if (!support.ok) {
+      throw new Error(`shader engine cannot run this model: ${support.reason}`);
     }
     const adapter = await navigator.gpu.requestAdapter({
       powerPreference: 'high-performance',
@@ -145,15 +147,36 @@ export class ShaderRunner implements CaEngine {
   }
 
   /**
-   * Limits of the WGSL step: perc is `array<f32, 64>` (3*16 + 16), perc4 is
-   * `array<vec4<f32>, 16>`, and the hidden vector is `array<vec4<f32>, HMAX=64>`
-   * because WGSL array sizes cannot be pipeline overrides.
+   * Limits of the WGSL step, each traceable to a declaration in `wgsl/pass1.wgsl`:
+   * `perc` is `array<f32, 64>` and `perc4` is `array<vec4<f32>, 16>`, so
+   * `3C + CONDN <= 64`; the hidden vector is `array<vec4<f32>, HMAX=64>` because
+   * WGSL array sizes cannot be pipeline overrides, so `hidden/4 <= 64`; `LH` only
+   * has offsets for one hidden->hidden block in `weights.bin`, so 2 layers.
+   *
+   * Grid: three storage buffers of `C*H*W*4` bytes must fit the default
+   * `maxStorageBufferBindingSize` (128 MiB), which is a *pixel* budget here --
+   * with C=16 that is ~700k pixels, i.e. up to 836x836.
    */
-  static supports(model: ManifestModel): boolean {
-    const C = model.meta.channel_n;
-    const h = model.meta.weights.hidden_n;
-    const condN = model.meta.cond_n ?? 0;
-    return C >= 4 && C <= 16 && h > 0 && h % 4 === 0 && h / 4 <= 64 && condN <= 16;
+  static readonly CAPABILITIES: Capabilities = {
+    kind: 'shader',
+    label: 'WebGPU shader',
+    cond: true,
+    gpuBrush: true,
+    gpuRender: true,
+    maxC: 16,
+    maxHidden: 256,
+    maxLayers: 2,
+    maxCond: 16,
+    maxPerc: 64,
+    maxGridPx: Math.floor((128 * 1024 * 1024) / (3 * 16 * 4)),
+  };
+
+  static supports(model: ManifestModel): Support {
+    return checkSpec(ShaderRunner.CAPABILITIES, model.meta);
+  }
+
+  get capabilities(): Capabilities {
+    return ShaderRunner.CAPABILITIES;
   }
 
   get mode(): string {

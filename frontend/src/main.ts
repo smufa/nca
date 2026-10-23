@@ -4,6 +4,7 @@ import type { Manifest, ManifestModel } from './models';
 import { CaRunner } from './runner';
 import { ShaderRunner } from './shader';
 import type { CaEngine } from './engine';
+import { checkSpec } from './engine';
 import { CANONICAL_KERNELS, mapChannels, rotateKernels } from './nca';
 import type { ChannelMapping } from './nca';
 
@@ -182,8 +183,8 @@ function fillChannelSelect(
 
 function drawView(view: View): void {
   if (!runner) return;
-  if (runner.renderTo) {
-    runner.renderTo(view.canvas, view.mapping);
+  if (runner.capabilities.gpuRender) {
+    runner.renderTo!(view.canvas, view.mapping);
     return;
   }
   if (!view.ctx2d || !view.image) return;
@@ -221,8 +222,8 @@ function paintDot(view: View, cx: number, cy: number): void {
   const factor = brushFactor;
 
   // GPU engines apply the stroke in a compute pass - no state upload.
-  if (runner.brush) {
-    runner.brush(op, cx, cy, brushRadius, factor, targets);
+  if (runner.capabilities.gpuBrush) {
+    runner.brush!(op, cx, cy, brushRadius, factor, targets);
     return;
   }
 
@@ -408,8 +409,7 @@ function applyCondVector(): void {
   updateCondLabel();
   const v = readCondVector();
   void whenIdle().then(() => {
-    if (runner?.setCondVector) runner.setCondVector(v);
-    else runner?.setCond?.(v.indexOf(Math.max(...v)));
+    if (runner?.capabilities.cond) runner.setCondVector(v);
   });
 }
 
@@ -522,7 +522,7 @@ function createView(mapping: ChannelMapping): View {
   const canvas = document.createElement('canvas');
   canvas.width = grid;
   canvas.height = grid;
-  const onGpu = !!runner.renderTo;
+  const onGpu = runner.capabilities.gpuRender;
   let ctx2d: CanvasRenderingContext2D | null = null;
   let image: ImageData | null = null;
   if (!onGpu) {
@@ -685,13 +685,13 @@ async function selectModel(model: ManifestModel): Promise<void> {
     runner = null;
   }
   prevPerf = { maskMs: 0, runMs: 0, syncMs: 0, steps: 0 };
-  let shaderFallback = false;
+  // Advertised capabilities, not `?.` probing: the reason a shader model falls
+  // back to WASM is data the UI can show ("hidden=64 > 32").
+  const support = ep === 'shader' ? ShaderRunner.supports(model) : ({ ok: true } as const);
+  const fallbackReason = support.ok ? null : support.reason;
   try {
-    const shaderOk = ep !== 'shader' || ShaderRunner.supports(model);
-    shaderFallback = !shaderOk;
-    runner = !shaderOk
-      ? await CaRunner.create(model)
-      : ep === 'shader'
+    runner =
+      ep === 'shader' && support.ok
         ? await ShaderRunner.create(model)
         : await CaRunner.create(model);
   } catch (e) {
@@ -701,7 +701,7 @@ async function selectModel(model: ManifestModel): Promise<void> {
   }
   setupCond(model);
   // A fresh engine starts from its own default, so push the current mix into it.
-  if (condSliders.length && runner.setCondVector) {
+  if (condSliders.length && runner.capabilities.cond) {
     runner.setCondVector(readCondVector());
   }
   rebuildViews();
@@ -709,12 +709,31 @@ async function selectModel(model: ManifestModel): Promise<void> {
   gridSizeSelect.value = String(runner.grid);
   drawAll();
   updateInfo();
-  const label =
-    runner.mode === 'gpu' ? 'WebGPU' : runner.mode === 'shader' ? 'WebGPU shader' : 'WASM';
-  if (shaderFallback) {
-    setStatus(`ready · ${label} (shader unsupported for this model size)`, 'warn');
+  const label = runner.capabilities.label;
+  if (fallbackReason) {
+    setStatus(`ready · ${label} (shader cannot run this model: ${fallbackReason})`, 'warn');
   } else {
     setStatus(`ready · ${label}`, 'ok');
+  }
+  markPickerSupport();
+}
+
+/**
+ * Mark the models the selected engine cannot run, with the reason as the option's
+ * tooltip. Re-run whenever the engine switch changes, since "runs on shader" is a
+ * property of the engine/model pair.
+ */
+function markPickerSupport(): void {
+  if (!manifest) return;
+  const caps = ep === 'shader' ? ShaderRunner.CAPABILITIES : CaRunner.CAPABILITIES;
+  for (const opt of Array.from(modelSelect.options)) {
+    const model = manifest.models.find((m) => m.id === opt.value);
+    if (!model) continue;
+    const support = checkSpec(caps, model.meta);
+    opt.disabled = !support.ok;
+    opt.title = support.ok
+      ? `${model.id} · C=${model.meta.channel_n} h=${model.meta.hidden_n}`
+      : `${model.id} · ${caps.label} cannot run it: ${support.reason}`;
   }
 }
 
@@ -844,7 +863,7 @@ stepBtn.addEventListener('click', async () => {
   setBusy(true);
   try {
     await runner.step();
-    if (!runner.renderTo) await runner.sync();
+    if (!runner.capabilities.gpuRender) await runner.sync();
   } catch (e) {
     console.error(e);
     setStatus(`step failed: ${(e as Error).message}`, 'err');
@@ -867,6 +886,8 @@ speedInput.addEventListener('input', () => {
 });
 
 modelSelect.addEventListener('change', () => {
+  // The engine/model pair decides what is runnable, so re-mark before reloading.
+  markPickerSupport();
   const m = manifest?.models.find((x) => x.id === modelSelect.value);
   if (m) void selectModel(m);
 });
@@ -877,6 +898,8 @@ engineSelect.value = ep;
 engineSelect.addEventListener('change', () => {
   ep = engineSelect.value as Ep;
   localStorage.setItem('nca.ep', ep);
+  // The engine/model pair decides what is runnable, so re-mark before reloading.
+  markPickerSupport();
   const m = manifest?.models.find((x) => x.id === modelSelect.value);
   if (m) void selectModel(m);
 });
@@ -934,7 +957,7 @@ async function frame(t: number): Promise<void> {
       await runner.step();
       done++;
     }
-    if (!runner.renderTo) await runner.sync();
+    if (!runner.capabilities.gpuRender) await runner.sync();
   } catch (e) {
     console.error(e);
     setStatus(`step failed: ${(e as Error).message}`, 'err');

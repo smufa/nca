@@ -416,7 +416,7 @@ needed (growing vs regenerating is not comparable through `min_loss` today) or w
       exist: `ui/views.ts` (`View`, `ChannelMapping`, canvas draw), `ui/kernelLab.ts`,
       `ui/condPanel.ts`, `ui/brush.ts`, `ui/perf.ts`, and `session.ts` (owns
       `runner`, `selectToken`, `whenIdle`, `busy`). `main.ts` becomes wiring.
-- [ ] Capability negotiation replaces `?.` probing. Today
+- [x] Capability negotiation replaces `?.` probing. Today
       `ShaderRunner.supports()` returns a bare bool and `main.ts` silently falls
       back to WASM; `setCond?`, `renderTo?`, `brush?` are optional methods the
       caller feature-detects ad hoc. Replace with:
@@ -434,6 +434,19 @@ supports(spec: ModelSpec): { ok: true } | { ok: false; reason: string }
   shader limit"), and a third backend can be added without touching `main.ts`.
   **Both engines stay first-class** (decision 1): `ort` advertises
   `maxC/maxHidden = ∞` and `gpuRender: false`.
+
+  **As built:** `Capabilities` + `checkSpec()` live in `frontend/src/engine.ts`,
+  each engine exports a `CAPABILITIES` object with `supports(meta)` delegating to
+  `checkSpec`; `main.ts` branches on `runner.capabilities.{gpuRender,gpuBrush,cond}`
+  and shows the *reason* in the status bar ("shader cannot run this model:
+  `3*C+cond_n=52 > 48`"), and the picker disables unrunnable models with that
+  reason as the tooltip. `setCond`/`setCondVector` became required methods (both
+  engines implement them); only `renderTo`/`brush` stay optional, gated by
+  capabilities. Shader bounds are now traced to `wgsl/pass1.wgsl`:
+  `3C+cond <= 64` (`perc`/`perc4` arrays), `hidden/4 <= 64` (`HG <= HMAX`),
+  `layers <= 2` (one `wmid` block in `weights.bin`), and a grid budget of
+  128 MiB / (3*C*4) pixels ≈ 836² at C=16.
+  Still open: no JS unit test runner (the outcome is covered by `tsc` + manual).
 - [ ] `nca/export.py` (506 lines) → `nca/export/{graph,weights,verify,manifest}.py`.
 - [x] `nca/step.py`: torch-free canonical primitives (`ident/dx/dy`,
       `perception_weight`, `make_seed`, `map_channels`/`ChannelMapping`) imported

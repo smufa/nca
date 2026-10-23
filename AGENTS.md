@@ -136,6 +136,11 @@ bash slurm/submit_sweep.sh slurm/sweeps/emoji-sweep.toml   # cluster: 18 jobs
 | `wasm` | onnxruntime-web WASM | compatibility fallback; runs anything the shader cannot |
 | `shader` | native WGSL | performance path; 2 dispatches, zero-copy render + GPU brush |
 
+Both advertise a `Capabilities` object (`frontend/src/engine.ts`: `maxC`,
+`maxHidden`, `maxLayers`, `maxCond`, `maxPerc`, `maxGridPx`, `gpuRender`,
+`gpuBrush`) and `checkSpec()` is the only place a spec is tested against them, so
+"why is this model on WASM" is a string, not a guess.
+
 The ORT **WebGPU EP was removed** (per-node dispatch lost to both engines) — do not
 reintroduce it. URL params: `?ep=wasm|shader`, `?log=1`; the choice persists in
 `localStorage["nca.ep"]`. Details: [`docs/findings/frontend-engines.md`](docs/findings/frontend-engines.md).
