@@ -214,3 +214,27 @@ cost at all (every cell computes regardless), so this is what makes "lower fire
 rate" a real performance knob; and the scattered gather after compaction is cheap
 because the perception reads land in the same few L2 lines the baseline already
 touches.
+
+### int8: not viable on either axis
+
+Asked as the obvious next step down ("or something like that"). Measured with the
+same harness (`scripts/fp16_drift.py --variants int8`, symmetric per-output-row
+int8 weights, dequantised, 500 steps, fixed fire masks):
+
+| variant | state max\|Δ\| | render PSNR | alpha IoU |
+|---|---|---|---|
+| fp16 weights | 3.6e-03 | 75.5 dB | 1.0000 |
+| **int8 weights** | **8.8e-01** | **27.1 dB** | **0.9523** |
+
+An 8-bit code gives ~4e-3 *relative* error per weight, which is 1e-2..1e-1 on the
+row's largest term, and the CA's alpha channel crosses the 0.1 living-mask
+threshold a few steps later — the pattern does not blur, it dies or deforms. Unlike
+fp16 there is no safe "storage-only, f32 accumulate" configuration that rescues it.
+
+The speed axis is worse. The adapter exposes 56 features, including `shader-f16`
+and `shader-i16` — and **not** `packed-4x8-integer-dot-product`, so WGSL has no
+`dot4I8Packed` here. An int8 kernel would unpack 4 bytes to 4 floats and run the
+same f32 dot, i.e. the conversion trap that made fp16 a 1.4x *regression*, plus
+dequantisation scales. Conclusion: no int8 path, and on this class of hardware no
+precision-lowering path at all — the win has to come from doing less arithmetic
+(work skipping), not narrower arithmetic.

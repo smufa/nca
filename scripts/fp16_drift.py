@@ -34,6 +34,21 @@ def f16(a: np.ndarray) -> np.ndarray:
     return a.astype(np.float16).astype(np.float32)
 
 
+def int8(a: np.ndarray) -> np.ndarray:
+    """Symmetric per-row int8 quantisation, dequantised.
+
+    Per output row (a neuron), which is the layout an int8 kernel wants: one scale
+    per row of `W1`/`W2`, one per bias vector. Dequantised back to f32 because the
+    question here is accuracy, not speed.
+    """
+    a = np.asarray(a, np.float32)
+    if a.ndim == 1:
+        scale = max(float(np.abs(a).max()) / 127.0, 1e-12)
+        return np.round(a / scale) * scale
+    scale = np.maximum(np.abs(a).max(axis=1, keepdims=True) / 127.0, 1e-12)
+    return np.round(a / scale) * scale
+
+
 def load(model_dir: Path):
     meta = json.loads((model_dir / "meta.json").read_text())
     w = np.fromfile(model_dir / "weights.bin", dtype="<f4")
@@ -79,6 +94,9 @@ def make_step(w, grid: int, rounding: str, noise: float = 0.0):
     if rounding in ("weights", "all"):
         W1, b1, W2, b2 = f16(W1), f16(b1), f16(W2), f16(b2)
         mids = [f16(m) for m in mids]
+    if rounding == "int8":
+        W1, b1, W2, b2 = int8(W1), int8(b1), int8(W2), int8(b2)
+        mids = [int8(m) for m in mids]
     use_acts = rounding in ("acts", "all")
     use_state = rounding in ("state", "all")
     rng = np.random.default_rng(12345)
@@ -137,6 +155,8 @@ def main() -> None:
     ap.add_argument("--steps", type=int, default=500)
     ap.add_argument("--grid", type=int, default=None)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--variants", type=str, default=None,
+                    help="comma list of eps,weights,acts,state,all,int8 (default: all but state)")
     ap.add_argument("--no-living", action="store_true",
                     help="skip the pass2 living mask (what the shader bench compares, and "
                          "what makes long-run drift saturate)")
@@ -159,7 +179,7 @@ def main() -> None:
     # "eps" is the control: fp32 arithmetic with a 1e-7 state perturbation, i.e. the
     # size of a float32 rounding difference. If fp16 diverges like eps does, the
     # divergence is chaos amplifying rounding noise, not fp16 error.
-    variants = ["eps", "weights", "state", "acts", "all"]
+    variants = [v for v in (args.variants or "eps,weights,acts,all,int8").split(",") if v]
     steps = {v: make_step(w, grid, "none" if v == "eps" else v, noise=1e-7 if v == "eps" else 0.0)
              for v in variants}
     ref_step = make_step(w, grid, "none")
