@@ -18,6 +18,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p logs
 
+# Lmod exports a Python 3.12 PYTHONPATH on ARNES login nodes; it shadows the
+# venv's own packages and `import numpy` then fails from the wrong interpreter.
+# `slurm/train.sbatch` unsets the same two for the job itself.
+unset PYTHONPATH PYTHONHOME
+
 # Same interpreter the repo uses everywhere: the venv if present, else `uv run`,
 # else whatever `python` is on PATH (the cluster has an activated venv already).
 if [ -n "${PYTHON:-}" ]; then
