@@ -2417,7 +2417,7 @@
         "num_parameters": 8336,
         "grid": 32,
         "dynamic_shape": true,
-        "wrap": true,
+        "wrap": false,
         "opset": 19,
         "experiment": "regenerating",
         "target": "emoji:\ud83d\ude00",
@@ -2755,5 +2755,5 @@
       }
     }
   ],
-  "generated": "2026-10-23T02:08:56"
+  "generated": "2026-10-23T13:04:55"
 }
