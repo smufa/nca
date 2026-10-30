@@ -52,11 +52,12 @@ class TrainConfig:
     seed: int = 0
     amp: str = "auto"  # auto (bf16 on CUDA) | off | bf16
     compile: bool = False  # torch.compile the unrolled step (see docs/findings/training-perf.md)
-    # Layout of the state tensors inside the loop. `channels_last` makes the two
-    # 1x1 update convolutions run as [B,HW,C] gemms and the depthwise perception
-    # convs NHWC, which is what cudnn/tensor cores want. Training only: the
-    # exports, the shader and the on-disk tensors stay NCHW.
-    memory_format: str = "channels_last"  # channels_last | contiguous
+    # Layout of the state tensors inside the loop. `channels_last` would let the
+    # two 1x1 convolutions run as [B,HW,C] gemms, but it measured 0.71x on the MIG
+    # slice (the per-step pad/maxpool/elementwise work is optimised for NCHW, and
+    # the layout conversions cost more than the gemms save). Kept as a switch
+    # because the trade depends on the GPU; see docs/findings/training-perf.md.
+    memory_format: str = "contiguous"  # contiguous | channels_last
     # Extra loss terms (nca/losses.py), as a JSON-safe dict so `asdict(cfg)`
     # records them in train.json. None = the historical pixel-only MSE.
     loss: dict | None = None

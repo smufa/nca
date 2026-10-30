@@ -102,6 +102,10 @@ class NeuralCA(nn.Module):
         # living mask cannot zero it away.
         self.cond_n = cond_n
         self.hidden_layers = hidden_layers
+        # Lazily built 0-dim tensor of the state's dtype/device, reused by the
+        # `where` at the end of `forward` (see there). Not a buffer: it has to follow
+        # the *input* dtype, not the parameters', and `_apply` clears it.
+        self._zeros: torch.Tensor | None = None
 
         # Perception output has 3 * channel_n channels (+ cond_n for a conditional
         # model); the update rule is a small MLP per cell via 1x1 convolutions.
@@ -135,6 +139,11 @@ class NeuralCA(nn.Module):
                 _perception_kernels(channel_n),
                 persistent=False,
             )
+
+    def _apply(self, fn, recurse: bool = True):
+        """Clear the cached zero tensor when the module changes device/dtype."""
+        self._zeros = None
+        return super()._apply(fn, recurse)
 
     @property
     def num_parameters(self) -> int:
@@ -227,4 +236,8 @@ class NeuralCA(nn.Module):
 
         post_life_mask = get_living_mask(x, self.wrap)
         life_mask = pre_life_mask & post_life_mask
-        return x * life_mask
+        # `where` is the same operation as `x * life_mask` but one kernel instead of
+        # three (bool->float cast, broadcast multiply) -- and one ONNX node instead
+        # of three (`Cast`+`And`+`Mul`). Both zero a dead cell and give it zero
+        # gradient; they differ only in the sign of a zeroed zero.
+        return torch.where(life_mask, x, 0.0)

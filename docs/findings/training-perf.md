@@ -66,6 +66,13 @@ Whole iteration, MIG slice:
 - **Batch and unroll are not throughput knobs.** Eager throughput saturates at
   batch 16: 79 → 87 → 87.3 → 87.5 samples/s for batch 8/16/32/64 at unroll 32.
   Bigger batches cost wall time and buy only credit assignment and memory use.
+- **Channels-last is a loss here** (`--memory-format channels_last`, 0.71× eager:
+  463 → 654 ms at b16/u80, 552 → 774 at b32/u48). The 1×1 convs do become
+  `[B,HW,C]` gemms, but everything *else* in a step (two circular pads, two
+  max-pools, five broadcasts, the `cat`) is tuned for NCHW, and the conversions
+  cost more than the gemms save. With `--compile` it lands at parity, because
+  inductor inserts the transposes back. Kept as a switch (default `contiguous`)
+  since the trade depends on the GPU's cache and kernel library.
 
 Peak GPU memory at batch 16: **5.7 GB fp32 / 3.2 GB bf16**, linear in
 `batch_size × train_steps` (autograd keeps every step's activations), so a
