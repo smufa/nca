@@ -112,7 +112,7 @@ def main() -> None:
     pool = SamplePool(seed.repeat(args.pool_size, 1, 1, 1).contiguous().to(dev))
     x0 = seed.repeat(args.batch, 1, 1, 1).contiguous()
     n = args.unroll
-    dmg = min(3, args.batch - 1)
+    dmg = 3
     noise = 1
 
     print(
@@ -141,16 +141,16 @@ def main() -> None:
             x = ca(x, cond=cond_for(x.shape[0]))
         per_sample_loss(x, target).mean().backward()
 
-    def sample_rank():
-        idx, xb, _pool_cond = pool.sample(args.batch, gen)
+    def sample_rank(batch: int, src=None):
+        idx, xb, _pool_cond = (src or pool).sample(batch, gen)
         with torch.no_grad():
             rank = per_sample_loss(xb, target).argsort(descending=True)
         xb = xb[rank].clone()
         idx = idx[rank]
         xb[0] = seed
         if dmg:
-            masks = make_circle_masks(dmg, h, w, gen).to(dev)
-            xb[-dmg:] *= (1.0 - masks).unsqueeze(1)
+            masks = make_circle_masks(min(dmg, batch - 1), h, w, gen).to(dev)
+            xb[-(dmg):] *= (1.0 - masks).unsqueeze(1)
         if noise:
             xb[-(dmg + noise) : -dmg] += torch.randn(
                 noise, *xb.shape[1:], generator=gen
@@ -248,24 +248,22 @@ def main() -> None:
         print("\n== whole iteration vs batch (is the loop dispatch-bound?) ==")
         model = torch.compile(ca, mode="default") if args.compile else ca
         for batch in (8, 16, 32, 64):
-            xb = seed.repeat(batch, 1, 1, 1).contiguous()
-            pool = SamplePool(seed.repeat(args.pool_size, 1, 1, 1).contiguous().to(dev))
-            x0 = xb
+            this_pool = SamplePool(seed.repeat(args.pool_size, 1, 1, 1).contiguous().to(dev))
 
-            def it():
-                idx, xb2 = sample_rank()
+            def it(batch=batch, this_pool=this_pool):
+                idx, xb2 = sample_rank(batch, this_pool)
                 optimizer.zero_grad(set_to_none=True)
                 x = xb2
                 for _ in range(n):
                     x = model(x, cond=cond_for(x.shape[0]))
                 per_sample_loss(x, target).mean().backward()
                 optimizer.step()
-                pool.commit(idx, xb2)
+                this_pool.commit(idx, xb2)
                 return None
 
             try:
                 with torch.no_grad():
-                    model(xb, cond=cond_for(batch))  # warm the compiled graph
+                    model(seed.repeat(batch, 1, 1, 1), cond=cond_for(batch))  # warm the graph
                 if dev.type == "cuda":
                     torch.cuda.empty_cache()
                     torch.cuda.reset_peak_memory_stats()
@@ -291,7 +289,6 @@ def main() -> None:
             (64, 48, True, True),
         ]:
             n = unroll
-            x0 = seed.repeat(batch, 1, 1, 1).contiguous()
             this_pool = SamplePool(seed.repeat(args.pool_size, 1, 1, 1).contiguous().to(dev))
             model = torch.compile(ca, mode="default") if comp else ca
             ctx = (
@@ -300,13 +297,8 @@ def main() -> None:
                 else contextlib.nullcontext()
             )
 
-            def it():
-                idx, xb2 = this_pool.sample(batch, gen)
-                xb2 = xb2.clone()
-                xb2[0] = seed
-                if dmg:
-                    masks = make_circle_masks(dmg, h, w, gen).to(dev)
-                    xb2[-dmg:] *= (1.0 - masks).unsqueeze(1)
+            def it(batch=batch, this_pool=this_pool, n=n, model=model, ctx=ctx):
+                idx, xb2 = sample_rank(batch, this_pool)
                 optimizer.zero_grad(set_to_none=True)
                 with ctx:
                     x = xb2
@@ -332,12 +324,21 @@ def main() -> None:
     if args.variants:
         print("\n== variants (whole iteration) ==")
         for batch in (8, 16, 32, 64):
-            if batch * (n) * h * w * spec.channel_n * 4 > 8e9:
-                continue
-            x0 = seed.repeat(batch, 1, 1, 1).contiguous()
-            pool = SamplePool(seed.repeat(args.pool_size, 1, 1, 1).contiguous().to(dev))
+            this_pool = SamplePool(seed.repeat(args.pool_size, 1, 1, 1).contiguous().to(dev))
+
+            def variant_iter(batch=batch, this_pool=this_pool):
+                idx, xb2 = sample_rank(batch, this_pool)
+                optimizer.zero_grad(set_to_none=True)
+                x = xb2
+                for _ in range(n):
+                    x = ca(x, cond=cond_for(x.shape[0]))
+                per_sample_loss(x, target).mean().backward()
+                optimizer.step()
+                this_pool.commit(idx, xb2)
+                return None
+
             try:
-                ms = timeit(one_iteration, dev, max(args.iters // 2, 5))
+                ms = timeit(variant_iter, dev, max(args.iters // 2, 5))
                 print(f"  batch={batch:3d} unroll={n:3d}  {ms:8.2f} ms  {1000 / ms:6.2f} it/s"
                       f"  {batch / (ms / 1000):7.1f} sample-steps/s")
             except RuntimeError as exc:
