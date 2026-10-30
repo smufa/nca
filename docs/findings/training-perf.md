@@ -78,7 +78,24 @@ Peak GPU memory at batch 16: **5.7 GB fp32 / 3.2 GB bf16**, linear in
 `batch_size × train_steps` (autograd keeps every step's activations), so a
 `1g.10gb` slice caps out near batch 16 × unroll 80 in fp32, ~b32 × u48 in bf16.
 
+## Levers that did not pay (measured, not guessed)
+
+At 72² the step is memory- and launch-bound at ~8-10% of peak, so *fewer FLOPs*
+is not the currency — fewer bytes and fewer kernels is. Three candidates were
+priced before/after implementation (b16, u80 unless noted):
+
+| lever | change | result |
+|---|---|---|
+| `where(mask, x, 0)` instead of `x * mask` | 1 kernel instead of 2 (cast + mul) | **0.8%** (459.5 vs 463.1 ms); 0% with `--compile`, which had already fused it. Kept: it is also the clearer code, and the exported graph is unchanged (dynamo lowers it back to `Cast`+`Mul`), so no re-export. |
+| **fold `cond` into the first conv's bias** | drops the `cat` of the 8 one-hot planes (16.6 MB/step) and 8 of `W1`'s 56 input channels | **+0.17 ms/step (a 7% regression)**: `cat` 0.225 ms + `conv 56→128` 0.687 ms = 0.912, versus `conv 48→128` 0.675 + per-sample broadcast `add` 0.403 = 1.078 (the hoisted `W1_cond·cond` matmul is 0.018 ms *per iteration*, i.e. free). Dropping 14% of the conv's MACs bought 1.7% of its time, while the replacement bias add moves 42 MB against the cat's 16.6 MB. |
+| channels-last state layout | `[B,HW,C]` gemms for the two 1×1 convs | **0.71x** (463 → 654 ms at b16/u80; 552 → 774 at b32/u48). The convs are not the problem; everything *else* (two circular pads, two max-pools, five broadcasts, the `cat`) is tuned for NCHW, and inductor's transposes put `--compile` back at parity. Switch kept, default `contiguous`. |
+
+The lesson for the next attempt: an op that replaces `N` bytes with `>N` bytes
+loses here regardless of its FLOP count. Only fusing kernels (one dispatch per
+step, as `frontend/src/wgsl/pass1.wgsl` does) changes the byte count on the wire.
+
 ## Consequences
+
 
 - **A full H100 is ~8× a MIG slice** at the same batch and schedule. Use an H100
   for a single run; use the 14 MIG slices for a *sweep*.
