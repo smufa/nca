@@ -74,6 +74,12 @@ def main() -> None:
     ap.add_argument(
         "--variants", action="store_true", help="also time batching / unroll / amp variants"
     )
+    ap.add_argument("--compile", action="store_true", help="also time torch.compile over the unroll")
+    ap.add_argument("--amp", action="store_true", help="also time bf16 autocast")
+    ap.add_argument(
+        "--batch-sweep", action="store_true",
+        help="time whole iterations at several batch sizes (fixed unroll)",
+    )
     args = ap.parse_args()
 
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -198,6 +204,74 @@ def main() -> None:
         print(f"  {'=> iterations/s':{width}s}  {1000 / total:8.2f}")
         if dev.type == "cuda":
             print(f"  {'peak memory':{width}s}  {torch.cuda.max_memory_allocated() / 2**30:8.2f} GiB")
+
+    if args.compile or args.amp:
+        print("\n== forwards: eager vs compiled vs bf16 ==")
+        eager = timeit(fwd, dev, max(args.iters // 2, 5))
+        print(f"  {'eager':12s} {eager:8.2f} ms  {eager / n:6.2f} ms/step")
+        model = ca
+        if args.compile:
+            try:
+                model_c = torch.compile(ca, mode="default")
+                # One warm-up call per shape compiles the graph; the timed runs replay it.
+                t0 = time.perf_counter()
+                with torch.no_grad():
+                    model_c(x0, cond=cond_for(args.batch))
+                print(f"  {'compile+warmup':12s} {1000 * (time.perf_counter() - t0):8.0f} ms (one-off)")
+
+                def fwd_c():
+                    with torch.no_grad():
+                        x = x0
+                        for _ in range(n):
+                            x = model_c(x, cond=cond_for(x.shape[0]))
+                    return x
+
+                ms = timeit(fwd_c, dev, max(args.iters // 2, 5))
+                print(f"  {'compile':12s} {ms:8.2f} ms  {ms / n:6.2f} ms/step  ({eager / ms:.2f}x)")
+            except Exception as exc:  # pragma: no cover - dynamic (noqa: BLE001)
+                print(f"  {'compile':12s} FAILED: {type(exc).__name__}: {str(exc).splitlines()[0][:60]}")
+        if args.amp and dev.type == "cuda":
+            def fwd_amp():
+                with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+                    x = x0
+                    for _ in range(n):
+                        x = model(x, cond=cond_for(x.shape[0]))
+                return x
+
+            ms = timeit(fwd_amp, dev, max(args.iters // 2, 5))
+            print(f"  {'bf16 autocast':12s} {ms:8.2f} ms  {ms / n:6.2f} ms/step  ({eager / ms:.2f}x)")
+            print(f"  {'peak memory':12s} {torch.cuda.max_memory_allocated() / 2**30:8.2f} GiB")
+
+    if args.batch_sweep:
+        print("\n== whole iteration vs batch (is the loop dispatch-bound?) ==")
+        model = torch.compile(ca, mode="default") if args.compile else ca
+        for batch in (8, 16, 32, 64):
+            xb = seed.repeat(batch, 1, 1, 1).contiguous()
+            pool = SamplePool(seed.repeat(args.pool_size, 1, 1, 1).contiguous().to(dev))
+            x0 = xb
+
+            def it():
+                idx, xb2 = sample_rank()
+                optimizer.zero_grad(set_to_none=True)
+                x = xb2
+                for _ in range(n):
+                    x = model(x, cond=cond_for(x.shape[0]))
+                per_sample_loss(x, target).mean().backward()
+                optimizer.step()
+                pool.commit(idx, xb2)
+                return None
+
+            try:
+                with torch.no_grad():
+                    model(xb, cond=cond_for(batch))  # warm the compiled graph
+                ms = timeit(it, dev, max(args.iters // 2, 5))
+                print(
+                    f"  batch={batch:3d}  {ms:8.2f} ms  {1000 / ms:6.2f} it/s"
+                    f"  {batch / (ms / 1000):7.1f} samples/s"
+                    f"  {torch.cuda.max_memory_allocated() / 2**30:5.2f} GiB"
+                )
+            except RuntimeError as exc:
+                print(f"  batch={batch:3d}  FAILED: {str(exc).splitlines()[0][:70]}")
 
     if args.variants:
         print("\n== variants (whole iteration) ==")
