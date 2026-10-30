@@ -39,6 +39,8 @@ from nca.step import make_seed
 from nca.targets import prepare_targets
 from nca.train import TrainConfig, make_circle_masks, per_sample_loss
 
+MEMORY_FORMAT = "channels_last"
+
 TARGETS = [
     "emoji:1f980", "emoji:1f419", "emoji:1f996", "emoji:1f422",
     "emoji:1f335", "emoji:1f344", "emoji:1f41d", "emoji:1f9a9",
@@ -48,6 +50,13 @@ TARGETS = [
 def sync(dev: torch.device) -> None:
     if dev.type == "cuda":
         torch.cuda.synchronize()
+
+
+def lay(t: torch.Tensor) -> torch.Tensor:
+    """The loop's memory format; every operand of a step must share it."""
+    if MEMORY_FORMAT != "channels_last" or t.dim() != 4:
+        return t
+    return t.contiguous(memory_format=torch.channels_last)
 
 
 def timeit(fn, dev: torch.device, n: int = 20, warmup: int = 5) -> float:
@@ -79,6 +88,12 @@ def main() -> None:
     ap.add_argument("--amp", action="store_true", help="also time bf16 autocast")
     ap.add_argument("--recipe", action="store_true", help="time the combined knob settings")
     ap.add_argument(
+        "--memory-format",
+        default="channels_last",
+        choices=("channels_last", "contiguous"),
+        help="layout of the state tensors inside the loop (training only)",
+    )
+    ap.add_argument(
         "--batch-sweep", action="store_true",
         help="time whole iterations at several batch sizes (fixed unroll)",
     )
@@ -92,7 +107,11 @@ def main() -> None:
     targets = prepare_targets(specs, max_size=args.target_size, padding=args.padding).to(dev)
     target = targets[:1]  # per-sample loss against one target keeps it comparable
     spec = ModelSpec(hidden_n=args.hidden, cond_n=args.cond)
+    global MEMORY_FORMAT
+    MEMORY_FORMAT = args.memory_format
     ca = spec.build().to(dev)
+    if MEMORY_FORMAT == "channels_last":
+        ca.to(memory_format=torch.channels_last)
     h, w = targets.shape[-2:]
     # `ca(x, cond=...)` broadcasts the conditioning rows over the batch dimension,
     # so one hot vector per sample is enough; cache them per batch size.
@@ -108,9 +127,9 @@ def main() -> None:
         return _conds[batch]
 
     optimizer = torch.optim.Adam(ca.parameters(), lr=2e-3)
-    seed = torch.from_numpy(make_seed(spec.channel_n, h, w)).float().to(dev).unsqueeze(0)
-    pool = SamplePool(seed.repeat(args.pool_size, 1, 1, 1).contiguous().to(dev))
-    x0 = seed.repeat(args.batch, 1, 1, 1).contiguous()
+    seed = lay(torch.from_numpy(make_seed(spec.channel_n, h, w)).float().to(dev).unsqueeze(0))
+    pool = SamplePool(lay(seed.repeat(args.pool_size, 1, 1, 1).to(dev)))
+    x0 = lay(seed.repeat(args.batch, 1, 1, 1))
     n = args.unroll
     dmg = 3
     noise = 1
@@ -145,7 +164,7 @@ def main() -> None:
         idx, xb, _pool_cond = (src or pool).sample(batch, gen)
         with torch.no_grad():
             rank = per_sample_loss(xb, target).argsort(descending=True)
-        xb = xb[rank].clone()
+        xb = lay(xb[rank].clone())
         idx = idx[rank]
         xb[0] = seed
         if dmg:
@@ -248,7 +267,7 @@ def main() -> None:
         print("\n== whole iteration vs batch (is the loop dispatch-bound?) ==")
         model = torch.compile(ca, mode="default") if args.compile else ca
         for batch in (8, 16, 32, 64):
-            this_pool = SamplePool(seed.repeat(args.pool_size, 1, 1, 1).contiguous().to(dev))
+            this_pool = SamplePool(lay(seed.repeat(args.pool_size, 1, 1, 1).to(dev)))
 
             def it(batch=batch, this_pool=this_pool):
                 idx, xb2 = sample_rank(batch, this_pool)
@@ -290,7 +309,7 @@ def main() -> None:
             (32, 48, True, True),
         ]:
             n = unroll
-            this_pool = SamplePool(seed.repeat(args.pool_size, 1, 1, 1).contiguous().to(dev))
+            this_pool = SamplePool(lay(seed.repeat(args.pool_size, 1, 1, 1).to(dev)))
             model = torch.compile(ca, mode="default") if comp else ca
             ctx = (
                 torch.autocast("cuda", dtype=torch.bfloat16)
@@ -325,7 +344,7 @@ def main() -> None:
     if args.variants:
         print("\n== variants (whole iteration) ==")
         for batch in (8, 16, 32, 64):
-            this_pool = SamplePool(seed.repeat(args.pool_size, 1, 1, 1).contiguous().to(dev))
+            this_pool = SamplePool(lay(seed.repeat(args.pool_size, 1, 1, 1).to(dev)))
 
             def variant_iter(batch=batch, this_pool=this_pool):
                 idx, xb2 = sample_rank(batch, this_pool)

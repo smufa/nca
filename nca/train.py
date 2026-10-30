@@ -52,6 +52,11 @@ class TrainConfig:
     seed: int = 0
     amp: str = "auto"  # auto (bf16 on CUDA) | off | bf16
     compile: bool = False  # torch.compile the unrolled step (see docs/findings/training-perf.md)
+    # Layout of the state tensors inside the loop. `channels_last` makes the two
+    # 1x1 update convolutions run as [B,HW,C] gemms and the depthwise perception
+    # convs NHWC, which is what cudnn/tensor cores want. Training only: the
+    # exports, the shader and the on-disk tensors stay NCHW.
+    memory_format: str = "channels_last"  # channels_last | contiguous
     # Extra loss terms (nca/losses.py), as a JSON-safe dict so `asdict(cfg)`
     # records them in train.json. None = the historical pixel-only MSE.
     loss: dict | None = None
@@ -188,6 +193,18 @@ def _resolve_amp(amp: str, device: torch.device) -> str:
     return "bf16" if device.type == "cuda" else "off"
 
 
+def _layout(x: torch.Tensor, cfg: TrainConfig) -> torch.Tensor:
+    """Put a 4D state tensor in the loop's memory format (a no-op for NCHW).
+
+    Every tensor that enters one CA step has to carry the *same* layout, because
+    cudnn dispatches on strides: a single NCHW operand silently drops the whole
+    unroll back to the slower kernels.
+    """
+    if cfg.memory_format != "channels_last" or x.dim() != 4:
+        return x
+    return x.contiguous(memory_format=torch.channels_last)
+
+
 def train(
     ca: NeuralCA,
     target: torch.Tensor,
@@ -262,6 +279,11 @@ def train(
         torch.set_float32_matmul_precision("high")
 
     ca.to(device)
+    if cfg.memory_format == "channels_last":
+        # Training-only: the module's params get channels-last strides, so the two
+        # 1x1 update convs run as [B,HW,C] gemms. The exported graph and the WGSL
+        # shader are untouched -- they never see these tensors' strides.
+        ca.to(memory_format=torch.channels_last)
 
     # One CA step is a chain of ~31 small kernels over 72x72 tensors, so the GPU
     # runs it at ~10% of its arithmetic peak either way; what `torch.compile`
@@ -279,7 +301,7 @@ def train(
             x = step_fn(x, update_mask=masks[k], cond=cond)
         return x
     target = target.to(device)
-    seed = seed.to(device)
+    seed = _layout(seed.to(device), cfg)
     _, h, w = seed.shape
 
     # A conditional run gets one target per emoji; every cell is told which one to
@@ -302,7 +324,9 @@ def train(
 
     pool = None
     if cfg.use_pool:
-        pool_x = seed.unsqueeze(0).repeat(cfg.pool_size, 1, 1, 1).contiguous()
+        pool_x = _layout(
+            seed.unsqueeze(0).repeat(cfg.pool_size, 1, 1, 1).contiguous(), cfg
+        )
         pool_cond = None
         if cond_n:
             # Spread the emoji round-robin over the initial pool.
@@ -377,6 +401,7 @@ def train(
         tgt = target
         if pool is not None:
             idx, x0, cond = pool.sample(cfg.batch_size, generator)
+            x0 = _layout(x0, cfg)
             if cond is not None:
                 tgt = target[cond.argmax(dim=1)]
             else:
