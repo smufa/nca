@@ -23,6 +23,7 @@ more in dispatch than in maths. If `fwd` here is far above `batch x steps x
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
 import time
 from pathlib import Path
@@ -76,6 +77,7 @@ def main() -> None:
     )
     ap.add_argument("--compile", action="store_true", help="also time torch.compile over the unroll")
     ap.add_argument("--amp", action="store_true", help="also time bf16 autocast")
+    ap.add_argument("--recipe", action="store_true", help="time the combined knob settings")
     ap.add_argument(
         "--batch-sweep", action="store_true",
         help="time whole iterations at several batch sizes (fixed unroll)",
@@ -264,6 +266,9 @@ def main() -> None:
             try:
                 with torch.no_grad():
                     model(xb, cond=cond_for(batch))  # warm the compiled graph
+                if dev.type == "cuda":
+                    torch.cuda.empty_cache()
+                    torch.cuda.reset_peak_memory_stats()
                 ms = timeit(it, dev, max(args.iters // 2, 5))
                 print(
                     f"  batch={batch:3d}  {ms:8.2f} ms  {1000 / ms:6.2f} it/s"
@@ -272,6 +277,57 @@ def main() -> None:
                 )
             except RuntimeError as exc:
                 print(f"  batch={batch:3d}  FAILED: {str(exc).splitlines()[0][:70]}")
+
+    if args.recipe:
+        print("\n== recipes: batch x unroll x compile x bf16 (whole iteration) ==")
+        print(f"  {'config':34s} {'ms':>8s} {'it/s':>7s} {'sample-steps/s':>15s} {'GiB':>6s}")
+        for batch, unroll, comp, amp in [
+            (16, 80, False, False),   # what the sweep ran
+            (16, 80, True, False),
+            (16, 80, False, True),
+            (32, 48, False, False),
+            (32, 48, True, True),
+            (64, 24, True, True),
+            (64, 48, True, True),
+        ]:
+            n = unroll
+            x0 = seed.repeat(batch, 1, 1, 1).contiguous()
+            this_pool = SamplePool(seed.repeat(args.pool_size, 1, 1, 1).contiguous().to(dev))
+            model = torch.compile(ca, mode="default") if comp else ca
+            ctx = (
+                torch.autocast("cuda", dtype=torch.bfloat16)
+                if amp and dev.type == "cuda"
+                else contextlib.nullcontext()
+            )
+
+            def it():
+                idx, xb2 = this_pool.sample(batch, gen)
+                xb2 = xb2.clone()
+                xb2[0] = seed
+                if dmg:
+                    masks = make_circle_masks(dmg, h, w, gen).to(dev)
+                    xb2[-dmg:] *= (1.0 - masks).unsqueeze(1)
+                optimizer.zero_grad(set_to_none=True)
+                with ctx:
+                    x = xb2
+                    for _ in range(n):
+                        x = model(x, cond=cond_for(x.shape[0]))
+                per_sample_loss(x.float(), target).mean().backward()
+                optimizer.step()
+                return None
+
+            label = f"b{batch} u{unroll}{' compile' if comp else ''}{' bf16' if amp else ''}"
+            try:
+                if dev.type == "cuda":
+                    torch.cuda.empty_cache()
+                    torch.cuda.reset_peak_memory_stats()
+                ms = timeit(it, dev, 5)
+                gib = torch.cuda.max_memory_allocated() / 2**30 if dev.type == "cuda" else 0.0
+                print(
+                    f"  {label:34s} {ms:8.1f} {1000 / ms:7.2f} {batch * unroll / (ms / 1000):15.0f} {gib:6.2f}"
+                )
+            except RuntimeError as exc:
+                print(f"  {label:34s} FAILED: {str(exc).splitlines()[0][:40]}")
 
     if args.variants:
         print("\n== variants (whole iteration) ==")
