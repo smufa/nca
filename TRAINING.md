@@ -48,10 +48,11 @@ sbatch -p mig-priority --constraint=mig --gres=gpu:1g.10gb:1 \
 - Measured MIG: **~2.3 it/s** at 72×72 / batch 16 → **~54 min per 8000-iteration
   run**. The same config on a full H100 is **~18.6 it/s (~7 min)** — the unroll is
   throughput-bound, so the GPU does matter here (see `AGENTS.md` for the table).
-  `--amp bf16` adds ~1.3–1.55× on MIG and halves memory; use it.
-- Batch size does **not** change throughput on MIG (time is exactly linear in
-  batch) — it only helps on an under-utilised H100. Keep batch 16 for comparable
-  models; note memory is ~linear in `batch_size x train_steps` (5.6 GB at 16x80).
+  bf16 is the default on CUDA (`--amp auto`, ~1.22× on MIG) and halves memory;
+  `--compile` adds fusion on top (**1.65–1.97× together** at b32/u48).
+- Throughput saturates at batch 16 on MIG (79 -> 87 -> 87.3 -> 87.5 samples/s for
+  batch 8/16/32/64), so a bigger batch buys credit assignment, not speed; memory
+  is ~linear in `batch_size x train_steps` (5.7 GB at 16x80 fp32, 3.2 GB bf16).
 - The node has 250 GB RAM, so `train.sbatch`'s default `--mem=64G` fits only **3**
   jobs. The `[resources]` block of a sweep sets `mem = "16G"`, `cpus = 4` so all
   14 slices run at once (an 18-job sweep then takes ~2 h).
@@ -103,8 +104,10 @@ Fallback if we want zero lock divergence: `uv venv --python 3.13` +
 - **Logging**: `loss.json` plus flushed stdout; `state.pt` and `ckpt_*.pt` are
   written every `--ckpt-every` steps. **All** intermediate checkpoints are kept
   (they are tiny). Batch montages go to `progress/` every `--progress-every`.
-- **Perf**: `cudnn.benchmark` + TF32 enabled automatically on CUDA. `--amp bf16`
-  is worth ~1.3x. `torch.compile` does **not** help (see `AGENTS.md`).
+- **Perf**: `cudnn.benchmark` + TF32 enabled automatically on CUDA, bf16 autocast
+  by default (`--amp off` to disable), `--compile` to add `torch.compile` (worth it
+  only with bf16). Numbers and the kernel breakdown:
+  `docs/findings/training-perf.md`.
 - **Batch size**: the unroll keeps activations for *every* step, so GPU memory is
   ~linear in `batch_size x train_steps` (5.6 GB at 16x80 on a 72² grid, 3.0 GB
   with bf16). But throughput is also linear in batch, so a bigger batch does

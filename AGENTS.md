@@ -99,6 +99,8 @@ uv run python main.py --target shape:heart --iterations 300        # train
 uv run python main.py --config slurm/sweeps/demo.toml --device cpu # a study's run, locally
 uv run python main.py --config slurm/sweeps/capacity.toml \
     --run crab.regenerating.c=8.h=128 --set lr=1e-3                # file < flags < --set
+uv run python main.py --target shape:heart --amp off --compile    # perf knobs
+                                                                  # (bf16 is the CUDA default)
 uv run python -m nca.export --checkpoint runs/.../ckpt_final.pt \
     --id NAME --target "emoji:1f980"                             # verifies parity
 uv run python -m nca.export --all            # re-export every model (falls back to
