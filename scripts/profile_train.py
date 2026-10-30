@@ -281,12 +281,13 @@ def main() -> None:
         print(f"  {'config':34s} {'ms':>8s} {'it/s':>7s} {'sample-steps/s':>15s} {'GiB':>6s}")
         for batch, unroll, comp, amp in [
             (16, 80, False, False),   # what the sweep ran
-            (16, 80, True, False),
-            (16, 80, False, True),
+            (16, 80, True, False),    # compile alone
+            (16, 80, False, True),    # bf16 alone
+            (16, 80, True, True),     # both
             (32, 48, False, False),
+            (32, 48, False, True),
+            (32, 48, True, False),
             (32, 48, True, True),
-            (64, 24, True, True),
-            (64, 48, True, True),
         ]:
             n = unroll
             this_pool = SamplePool(seed.repeat(args.pool_size, 1, 1, 1).contiguous().to(dev))

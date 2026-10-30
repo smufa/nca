@@ -6,6 +6,7 @@ per-variable gradient normalisation that stabilises training.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import random
 import time
@@ -49,7 +50,8 @@ class TrainConfig:
     gif_scale: int = 3
     make_gif: bool = True
     seed: int = 0
-    amp: str = "off"  # off | bf16
+    amp: str = "auto"  # auto (bf16 on CUDA) | off | bf16
+    compile: bool = False  # torch.compile the unrolled step (see docs/findings/training-perf.md)
     # Extra loss terms (nca/losses.py), as a JSON-safe dict so `asdict(cfg)`
     # records them in train.json. None = the historical pixel-only MSE.
     loss: dict | None = None
@@ -149,7 +151,7 @@ def _save_resume_state(
         },
     }
     if device.type == "cuda":
-        state["rng"]["cuda"] = torch.cuda.get_rng_state_all()
+        state["rng"]["cuda"] = torch.cuda.get_rng_state_all()  # ty: ignore[invalid-assignment]
     # The pool is [pool_size, C, H, W] (~340 MB at 1024x16x72x72). It is the whole
     # point of state.pt being large, and resuming without it is fine: the pool
     # simply restarts from the seed. Only keep it on request.
@@ -173,6 +175,19 @@ def _save_histories(
         (out_dir / "loss_components.json").write_text(json.dumps(components, indent=1))
 
 
+def _resolve_amp(amp: str, device: torch.device) -> str:
+    """``auto`` means bf16 on a CUDA device and fp32 everywhere else.
+
+    bf16 autocast is ~1.2x on a MIG slice and halves the activation memory (which
+    is what limits batch x unroll), but it is a no-op on CPU/MPS where the
+    autocast path is slower or unimplemented -- so the default is per-device
+    rather than a blanket "bf16", and every run records the resolved value.
+    """
+    if amp != "auto":
+        return amp
+    return "bf16" if device.type == "cuda" else "off"
+
+
 def train(
     ca: NeuralCA,
     target: torch.Tensor,
@@ -191,6 +206,10 @@ def train(
     """
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    # `amp="auto"` is resolved here, where the device is known, so `train.json`
+    # records what actually ran rather than "auto".
+    if cfg.amp == "auto":
+        cfg = dataclasses.replace(cfg, amp=_resolve_amp(cfg.amp, device))
 
     # A resume has to be validated *before* the run directory is rewritten: if the
     # checkpoint does not fit the module we just built, `load_state_dict` raises,
@@ -244,17 +263,20 @@ def train(
 
     ca.to(device)
 
-    # The unroll is ~80 sequential steps but it is throughput-bound, not
-    # latency-bound: time is linear in batch size, so there is nothing to fuse
-    # away. `torch.compile` measured neutral-to-slower here (compiling the whole
-    # sequence pays a warmup and is specialised per unroll length) - see
-    # docs/findings/training-perf.md. `scripts/profile_train.py --cuda-graphs`
-    # re-measures it if the assumption ever needs revisiting.
+    # One CA step is a chain of ~31 small kernels over 72x72 tensors, so the GPU
+    # runs it at ~10% of its arithmetic peak either way; what `torch.compile`
+    # buys is fewer launches per step, which only pays off once the bytes per
+    # step come down (i.e. together with bf16). Measured on a 1g MIG slice,
+    # b32/u48: eager fp32 552 ms -> compile+bf16 280 ms. See
+    # docs/findings/training-perf.md; `scripts/profile_train.py --recipe`
+    # re-measures it.
+    step_fn = torch.compile(ca) if cfg.compile else ca
+
     def forward(
         x: torch.Tensor, masks: torch.Tensor, cond: torch.Tensor | None
     ) -> torch.Tensor:
         for k in range(masks.shape[0]):
-            x = ca(x, update_mask=masks[k], cond=cond)
+            x = step_fn(x, update_mask=masks[k], cond=cond)
         return x
     target = target.to(device)
     seed = seed.to(device)
@@ -419,9 +441,11 @@ def train(
             else:
                 cond = None
 
-        n = int(
-            torch.randint(cfg.train_steps_min, cfg.train_steps_max, (1,), generator=generator)
-        )
+        # PyTorch's `randint` is half-open, and it *errors* when the bounds are
+        # equal - which is exactly what `--train-steps 48 48` (a pinned unroll)
+        # asks for.
+        lo, hi = cfg.train_steps_min, cfg.train_steps_max
+        n = lo if hi <= lo else int(torch.randint(lo, hi + 1, (1,), generator=generator))
         # Draw the whole unroll's fire mask in one shot: one RNG kernel instead
         # of n, and the step becomes deterministic given its inputs.
         masks = (

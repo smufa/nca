@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 import pytest
+import torch
 
 from nca import cli
 from nca.experiments import (
@@ -277,6 +278,18 @@ def test_regime_defaults_are_the_documented_ones() -> None:
         "noisy": (True, 3),
     }
     assert REGIMES["noisy"].noise_n == 4 and REGIMES["noisy"].noise_std == 0.2
+
+
+def test_amp_is_auto_and_compile_is_opt_in() -> None:
+    """`auto` resolves per device (bf16 on CUDA), so the default is not a dtype."""
+    from nca.train import _resolve_amp
+
+    exp = Experiment()
+    assert exp.amp == "auto" and exp.compile is False
+    assert _resolve_amp("auto", torch.device("cuda")) == "bf16"
+    assert _resolve_amp("auto", torch.device("cpu")) == "off"
+    assert _resolve_amp("off", torch.device("cuda")) == "off"  # explicit wins
+    assert exp.train_config().amp == "auto"
 
 
 # ---------------------------------------------------------------------------

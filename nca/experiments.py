@@ -149,7 +149,13 @@ class Experiment:
     lr_milestones: tuple[int, ...] | None = None  # None = 25% of iterations
     lr_gamma: float = 0.1
     normalize_grads: bool = True
-    amp: str = "off"
+    # "auto" = bf16 on CUDA, fp32 elsewhere (see `nca.train._resolve_amp`). bf16 is
+    # ~1.2x here and halves the activation memory, which is what limits
+    # batch x unroll; it is the default because the loss curve moves by <1%.
+    amp: str = "auto"
+    # torch.compile the unrolled step. Only worth it *with* bf16 (measured 1.97x
+    # together vs 1.22x for bf16 alone at b32/u48) and it costs ~10 s of warmup.
+    compile: bool = False
     seed: int = 0
     log_every: int = 10
     ckpt_every: int = 100
@@ -238,6 +244,7 @@ class Experiment:
             gif_steps=120,
             seed=self.seed,
             amp=self.amp,
+            compile=self.compile,
             loss=self.loss,
         )
 
@@ -344,7 +351,8 @@ def experiment_from_run_dir(run_dir: str | Path) -> Experiment:
         lr_milestones=tuple(cfg.get("lr_milestones") or ()) or None,
         lr_gamma=cfg.get("lr_gamma", 0.1),
         normalize_grads=cfg.get("normalize_grads", True),
-        amp=cfg.get("amp", "off"),
+        amp=cfg.get("amp", "auto"),
+        compile=bool(cfg.get("compile", False)),
         seed=cfg.get("seed", 0),
         log_every=cfg.get("log_every", 25),
         ckpt_every=cfg.get("ckpt_every", 250),

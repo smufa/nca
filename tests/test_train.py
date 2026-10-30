@@ -19,6 +19,7 @@ torch = pytest.importorskip("torch")
 from nca.spec import ModelSpec  # noqa: E402
 from nca.targets import make_seed  # noqa: E402
 from nca.train import TrainConfig, train  # noqa: E402
+from nca.train import TrainConfig, train  # noqa: E402
 
 GRID = 16
 CHANNELS = 8
@@ -113,3 +114,13 @@ def test_resume_continues_the_loss_history(tmp_path):
         resume=tmp_path / "state.pt",
     )
     assert len(losses) == 4
+
+
+def test_pinned_unroll_is_allowed(tmp_path):
+    """`--train-steps 48 48` pins the unroll; randint(48, 48) used to raise."""
+    cfg = _cfg(train_steps_min=48, train_steps_max=48)
+    losses = train(
+        _model(), _target(1), make_seed(GRID, GRID, CHANNELS), cfg,
+        torch.device("cpu"), tmp_path,
+    )
+    assert len(losses) == 2

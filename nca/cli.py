@@ -135,9 +135,15 @@ def build_parser() -> argparse.ArgumentParser:
     train_.add_argument("--no-grad-norm", action="store_true")
     train_.add_argument(
         "--amp",
-        choices=["off", "bf16"],
+        choices=["auto", "off", "bf16"],
         default=None,
-        help="autocast dtype for the unroll (bf16 may be ~2x on compute-bound GPUs)",
+        help="autocast dtype for the unroll (auto = bf16 on CUDA, fp32 elsewhere)",
+    )
+    train_.add_argument(
+        "--compile",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="torch.compile the unrolled step (worth it with bf16; ~10 s warmup)",
     )
     train_.add_argument("--seed", type=int, default=None, help=f"RNG seed (default {d.seed})")
 
@@ -230,6 +236,7 @@ def experiment_for(args: argparse.Namespace) -> Experiment:
         "lr_gamma": args.lr_gamma,
         "normalize_grads": False if args.no_grad_norm else None,
         "amp": args.amp,
+        "compile": args.compile,
         "seed": args.seed,
         "log_every": args.log_every,
         "ckpt_every": args.ckpt_every,
